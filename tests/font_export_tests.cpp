@@ -43,15 +43,12 @@ QByteArray table(const QByteArray &font, const char *tag) {
 QByteArray rectangleFont() {
     return fontBytes(described(project({{{{1}, "A"}, {filled(1, makeShape(ShapeKind::Rectangle, {0, 0, 20, 30}))}}})).font, FontFormat::Otf);
 }
-std::vector<FontPoint> ends(const Contour &contour) {
-    std::vector<FontPoint> result;
-    for (const auto &segment : contour.segments()) result.push_back(segmentEnd(segment));
+QPoint at(FontPoint point) { return {point.x, point.y}; }
+QList<QPoint> ends(const Contour &contour) {
+    QList<QPoint> result;
+    for (const auto &segment : contour.segments()) result.push_back(at(segmentEnd(segment)));
     return result;
 }
-}
-Q_DECLARE_METATYPE(FontPoint)
-namespace QTest {
-template<> char *toString(const FontPoint &p) { return qstrdup(QString("(%1, %2)").arg(p.x).arg(p.y).toUtf8()); }
 }
 
 class FontExportTests : public QObject {
@@ -61,10 +58,10 @@ private slots:
         const auto font = described(project({{{{1}, "A"}, {filled(1, makeShape(ShapeKind::Rectangle, {0, 0, 20, 30}))}}})).font;
         QCOMPARE(font.glyphs.size(), std::size_t(2));
         QCOMPARE(font.glyphs.at(1).name, QString("uni0041"));
-        QCOMPARE(font.glyphs.at(1).advance, std::uint16_t(1000));
+        QCOMPARE(int(font.glyphs.at(1).advance), 1000);
         const auto &c = font.glyphs.at(1).contours.at(0);
-        QCOMPARE(c.start(), (FontPoint{500, 0}));
-        QCOMPARE(ends(c), (std::vector<FontPoint>{{520, 0}, {520, 30}, {500, 30}, {500, 0}}));
+        QCOMPARE(at(c.start()), QPoint(500, 0));
+        QCOMPARE(ends(c), (QList<QPoint>{{520, 0}, {520, 30}, {500, 30}, {500, 0}}));
         QCOMPARE(font.characterMap.at(U'A'), GlyphIndex(1));
     }
     void openFilledPathIsClosedWithALine() {
@@ -74,38 +71,38 @@ private slots:
         open.lineTo(100, 100);
         const auto font = described(project({{{{1}, "v"}, {filled(1, open)}}})).font;
         const auto &c = font.glyphs.at(1).contours.at(0);
-        QCOMPARE(ends(c), (std::vector<FontPoint>{{600, 0}, {600, 100}, {500, 0}}));
+        QCOMPARE(ends(c), (QList<QPoint>{{600, 0}, {600, 100}, {500, 0}}));
     }
     void notdefOccupiesGlyphZeroAsAHollowBox() {
         const auto font = described(project({{{{1}, "A"}, {}}})).font;
         const auto &notdef = font.glyphs.at(0);
         QCOMPARE(notdef.name, QString(".notdef"));
-        QCOMPARE(notdef.advance, std::uint16_t(1000));
-        QCOMPARE(ends(notdef.contours.at(0)), (std::vector<FontPoint>{{900, 0}, {900, 700}, {100, 700}, {100, 0}}));
-        QCOMPARE(ends(notdef.contours.at(1)), (std::vector<FontPoint>{{150, 650}, {850, 650}, {850, 50}, {150, 50}}));
+        QCOMPARE(int(notdef.advance), 1000);
+        QCOMPARE(ends(notdef.contours.at(0)), (QList<QPoint>{{900, 0}, {900, 700}, {100, 700}, {100, 0}}));
+        QCOMPARE(ends(notdef.contours.at(1)), (QList<QPoint>{{150, 650}, {850, 650}, {850, 50}, {150, 50}}));
     }
     void nonzeroBaselineBecomesFontZeroAndHalvesRoundAwayFromZero() {
         auto p = project({{{{1}, "x"}, {filled(1, makeShape(ShapeKind::Rectangle, {0.5, 10, 20, 30.5}))}}});
         p.definition.baseline = 10;
         const auto font = described(p).font;
-        QCOMPARE(font.glyphs.at(1).contours.at(0).start(), (FontPoint{501, 0}));
-        QCOMPARE(font.lineMetrics.ascender, std::int16_t(740));
-        QCOMPARE(font.lineMetrics.descender, std::int16_t(-260));
+        QCOMPARE(at(font.glyphs.at(1).contours.at(0).start()), QPoint(501, 0));
+        QCOMPARE(int(font.lineMetrics.ascender), 740);
+        QCOMPARE(int(font.lineMetrics.descender), -260);
     }
     void evenOddHoleIsReversedToClockwise() {
         const auto result = described(project({{{{1}, "O"}, {filled(1, ring())}}}));
         const auto &contours = result.font.glyphs.at(1).contours;
-        QCOMPARE(ends(contours.at(0)), (std::vector<FontPoint>{{600, 0}, {600, 200}, {400, 200}, {400, 0}}));
-        QCOMPARE(contours.at(1).start(), (FontPoint{450, 50}));
-        QCOMPARE(ends(contours.at(1)), (std::vector<FontPoint>{{450, 150}, {550, 150}, {550, 50}, {450, 50}}));
+        QCOMPARE(ends(contours.at(0)), (QList<QPoint>{{600, 0}, {600, 200}, {400, 200}, {400, 0}}));
+        QCOMPARE(at(contours.at(1).start()), QPoint(450, 50));
+        QCOMPARE(ends(contours.at(1)), (QList<QPoint>{{450, 150}, {550, 150}, {550, 50}, {450, 50}}));
         QCOMPARE(result.warnings.size(), std::size_t(0));
     }
     void ellipseKeepsItsFourCubics() {
         const auto font = described(project({{{{1}, "o"}, {filled(1, makeShape(ShapeKind::Ellipse, {-100, 0, 200, 200}))}}})).font;
         const auto &c = font.glyphs.at(1).contours.at(0);
         QCOMPARE(c.segments().size(), std::size_t(4));
-        QCOMPARE(std::get<CubicSegment>(c.segments()[3]).end, (FontPoint{600, 100}));
-        QCOMPARE(c.start(), (FontPoint{600, 100}));
+        QCOMPARE(at(std::get<CubicSegment>(c.segments()[3]).end), QPoint(600, 100));
+        QCOMPARE(at(c.start()), QPoint(600, 100));
     }
     void selfCrossingShapeIsFlattenedWithAWarning() {
         const auto bowtie = makePenPath({{{0, 0}, {}}, {{100, 100}, {}}, {{100, 0}, {}}, {{0, 100}, {}}}, true);
@@ -144,6 +141,24 @@ private slots:
     void rejectsPointsOutsideTheOpenTypeRange() {
         auto p = project({{{{1}, "W"}, {filled(1, makeShape(ShapeKind::Rectangle, {0, 0, 20000, 30}))}}});
         QCOMPARE(std::get<QString>(describeFont(p, settings())), QString("Glyph “W” has points outside the range OpenType can store."));
+    }
+    void rejectsADrawingAreaWiderThanAnAdvanceCanStore() {
+        auto p = project({{{{1}, "A"}, {}}});
+        p.definition.bounds = QRectF(-20000, -250, 40000, 1000);
+        QCOMPARE(std::get<QString>(describeFont(p, settings())),
+                 QString("The drawing area is 40000 font units wide. OpenType export supports at most 16383."));
+    }
+    void widestDrawingAreaKeepsMetricsInRange() {
+        auto p = project({{{{1}, "A"}, {filled(1, makeShape(ShapeKind::Rectangle, {-24574.5, 0, 100, 30}))}}});
+        p.definition.bounds = QRectF(-8191.5, -250, 16383, 1000);
+        const auto bytes = fontBytes(described(p).font, FontFormat::Otf);
+        QCOMPARE(table(bytes, "head").mid(36, 8), QByteArray::fromHex("c001" "0000" "3999" "02bc"));
+        QCOMPARE(table(bytes, "hhea").mid(10, 8), QByteArray::fromHex("3fff" "c001" "0666" "3999"));
+        QCOMPARE(table(bytes, "OS/2").mid(2, 2), QByteArray::fromHex("3fff"));
+        QCOMPARE(table(bytes, "hmtx"), QByteArray::fromHex("3fff0666" "3fffc001"));
+        QRawFont raw(bytes, 1000, QFont::PreferNoHinting);
+        QCOMPARE(raw.advancesForGlyphIndexes(QList<quint32>{0, 1}), (QList<QPointF>{{16383, 0}, {16383, 0}}));
+        QCOMPARE(raw.pathForGlyph(1).boundingRect(), QRectF(-16383, -30, 100, 30));
     }
     void namesComeFromTheFamilySetting() {
         const auto font = std::get<DescribedFont>(describeFont(project({{{{1}, "A"}, {}}}), settings("  My (Font) "))).font;

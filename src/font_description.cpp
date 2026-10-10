@@ -6,7 +6,6 @@
 
 namespace fontu {
 namespace {
-constexpr double maximumCoordinate = 16383;
 constexpr std::size_t maximumGlyphs = 65535;
 
 struct OutOfRange {};
@@ -17,12 +16,13 @@ struct Placement {
 };
 Placement placement(const GlyphDocumentDefinition &d) { return {-d.bounds.left(), -d.baseline}; }
 
-std::int16_t fontUnit(double value) {
-    const auto rounded = std::round(value);
-    if (!std::isfinite(rounded) || std::abs(rounded) > maximumCoordinate) throw OutOfRange{};
-    return std::int16_t(rounded);
+FontCoordinate fontUnit(double value) {
+    const auto coordinate = FontCoordinate::rounded(value);
+    if (!coordinate) throw OutOfRange{};
+    return *coordinate;
 }
-FontPoint toFontPoint(QPointF point, Placement p) { return {fontUnit(point.x() + p.dx), fontUnit(point.y() + p.dy)}; }
+FontPoint fontPoint(double x, double y) { return {fontUnit(x), fontUnit(y)}; }
+FontPoint toFontPoint(QPointF point, Placement p) { return fontPoint(point.x() + p.dx, point.y() + p.dy); }
 
 QPolygonF flattened(const Contour &contour) {
     QPainterPath path(QPointF(contour.start().x, contour.start().y));
@@ -45,33 +45,37 @@ double signedArea(const QPolygonF &polygon) {
 }
 
 std::vector<std::vector<ContourSegment>> subpathSegments(const QPainterPath &path, Placement p) {
-    std::vector<std::vector<ContourSegment>> result;
-    FontPoint start{}, current{};
-    const auto finish = [&] {
-        if (result.empty()) return;
-        auto &segments = result.back();
-        if (current != start) segments.push_back(LineSegment{start});
+    struct Subpath {
+        FontPoint start;
+        FontPoint current;
+        std::vector<ContourSegment> segments;
     };
+    std::vector<Subpath> subpaths;
     for (int i = 0; i < path.elementCount(); ++i) {
         const auto e = path.elementAt(i);
         const auto point = toFontPoint(e, p);
         if (e.isMoveTo()) {
-            finish();
-            result.emplace_back();
-            start = current = point;
-        } else if (e.isLineTo()) {
-            if (point == current) continue;
-            result.back().push_back(LineSegment{point});
-            current = point;
+            subpaths.push_back({point, point, {}});
+            continue;
+        }
+        auto &s = subpaths.back();
+        if (e.isLineTo()) {
+            if (point == s.current) continue;
+            s.segments.push_back(LineSegment{point});
+            s.current = point;
         } else if (e.isCurveTo()) {
             const auto c2 = toFontPoint(path.elementAt(++i), p);
             const auto end = toFontPoint(path.elementAt(++i), p);
-            if (point == current && c2 == current && end == current) continue;
-            result.back().push_back(CubicSegment{point, c2, end});
-            current = end;
+            if (point == s.current && c2 == s.current && end == s.current) continue;
+            s.segments.push_back(CubicSegment{point, c2, end});
+            s.current = end;
         }
     }
-    finish();
+    std::vector<std::vector<ContourSegment>> result;
+    for (auto &s : subpaths) {
+        if (s.current != s.start) s.segments.push_back(LineSegment{s.start});
+        result.push_back(std::move(s.segments));
+    }
     return result;
 }
 
@@ -175,14 +179,14 @@ QString postScriptName(const QString &family) {
 }
 
 std::vector<ContourSegment> box(int left, int bottom, int right, int top, bool counterclockwise) {
-    const auto p = [](int x, int y) { return LineSegment{{std::int16_t(x), std::int16_t(y)}}; };
+    const auto p = [](int x, int y) { return LineSegment{fontPoint(x, y)}; };
     if (counterclockwise) return {p(right, bottom), p(right, top), p(left, top), p(left, bottom)};
     return {p(left, top), p(right, top), p(right, bottom), p(left, bottom)};
 }
-FontGlyph notdefGlyph(std::uint16_t advance, std::int16_t capHeight, std::uint16_t unitsPerEm) {
+FontGlyph notdefGlyph(FontAdvance advance, FontCoordinate capHeight, std::uint16_t unitsPerEm) {
     const int wall = std::max(1, unitsPerEm / 20);
     const int left = advance / 10, right = advance - advance / 10;
-    const int top = std::max<int>(capHeight, 2 * wall + 1);
+    const int top = std::max(int(capHeight), 2 * wall + 1);
     FontGlyph glyph{".notdef", advance, {}};
     if (right - left <= 2 * wall) return glyph;
     glyph.contours.push_back(*Contour::cycle(box(left, 0, right, top, true)));
@@ -233,24 +237,26 @@ FontDescriptionResult describeFont(const ProjectSnapshot &project, const FontSet
         return QString("Units per em must be a whole number from 16 to 16384.");
     if (project.glyphs.size() + 1 > maximumGlyphs)
         return QString("OpenType fonts hold at most 65535 glyphs, including .notdef.");
-    const auto advance = std::round(d.bounds.width());
-    if (!(advance >= 0 && advance <= 65535)) return QString("The drawing area is too wide for an OpenType advance width.");
+    const auto advance = FontAdvance::rounded(d.bounds.width());
+    if (!advance)
+        return QString("The drawing area is %1 font units wide. OpenType export supports at most %2.")
+            .arg(std::round(d.bounds.width())).arg(FontAdvance::maximum);
     const auto family = settings.familyName.trimmed();
     if (family.isEmpty()) return QString("Enter a font family name.");
 
-    DescribedFont result;
-    auto &font = result.font;
-    font.unitsPerEm = std::uint16_t(d.unitsPerEm);
-    font.names = {family, "Regular", postScriptName(family)};
-    font.timestamp = settings.timestamp;
     const auto p = placement(d);
+    const auto unitsPerEm = std::uint16_t(d.unitsPerEm);
+    std::optional<DescribedFont> described;
     try {
-        font.lineMetrics = {fontUnit(d.ascender + p.dy), fontUnit(d.descender + p.dy), 0,
-                            fontUnit(d.xHeight + p.dy), fontUnit(d.capHeight + p.dy)};
+        const LineMetrics metrics{fontUnit(d.ascender + p.dy), fontUnit(d.descender + p.dy),
+                                  fontUnit(d.xHeight + p.dy), fontUnit(d.capHeight + p.dy)};
+        described = DescribedFont{{unitsPerEm, {family, "Regular", postScriptName(family)}, metrics,
+                                   {notdefGlyph(*advance, metrics.capHeight, unitsPerEm), {}}, {}, settings.timestamp}, {}};
     } catch (const OutOfRange &) {
         return QString("The typography guides are outside the range OpenType can store.");
     }
-    font.glyphs.notdef = notdefGlyph(std::uint16_t(advance), font.lineMetrics.capHeight, font.unitsPerEm);
+    auto &result = *described;
+    auto &font = result.font;
     for (const auto &glyph : project.glyphs) {
         const auto index = GlyphIndex(font.glyphs.size());
         auto codePoint = labelCodePoint(glyph.seed.label);
@@ -259,7 +265,7 @@ FontDescriptionResult describeFont(const ProjectSnapshot &project, const FontSet
             result.warnings.push_back({ExportWarningKind::DuplicateLabel, glyph.seed.id, glyph.seed.label, 1});
             codePoint.reset();
         }
-        FontGlyph out{glyphName(codePoint, glyph.seed.id), std::uint16_t(advance), {}};
+        FontGlyph out{glyphName(codePoint, glyph.seed.id), *advance, {}};
         int strokes = 0;
         try {
             for (const auto &shape : glyph.shapes) {
@@ -276,7 +282,7 @@ FontDescriptionResult describeFont(const ProjectSnapshot &project, const FontSet
         if (strokes) result.warnings.push_back({ExportWarningKind::StrokeSkipped, glyph.seed.id, glyph.seed.label, strokes});
         font.glyphs.glyphs.push_back(std::move(out));
     }
-    return result;
+    return std::move(result);
 }
 
 }

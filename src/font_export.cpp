@@ -215,7 +215,7 @@ QByteArray hheaTable(const TableInput &in) {
     u32(out, 0x00010000);
     i16(out, metrics.ascender);
     i16(out, metrics.descender);
-    i16(out, metrics.lineGap);
+    i16(out, 0);
     u16(out, in.m.advanceMax);
     i16(out, in.m.minLeftBearing);
     i16(out, in.m.minRightBearing);
@@ -294,7 +294,7 @@ QByteArray os2Table(const TableInput &in) {
     u16(out, in.m.lastChar);
     i16(out, metrics.ascender);
     i16(out, metrics.descender);
-    i16(out, metrics.lineGap);
+    i16(out, 0);
     u16(out, std::max({0, in.m.fontBox.yMax, int(metrics.ascender)}));
     u16(out, std::max({0, -in.m.fontBox.yMin, -int(metrics.descender)}));
     u32(out, 0);
@@ -403,24 +403,24 @@ QByteArray charstring(const FontGlyph &glyph, int defaultWidth, int nominalWidth
         pending = op;
         if (++pendingCount == maximum) flush(op);
     };
-    FontPoint current{0, 0};
+    QPoint current;
     for (const auto &contour : glyph.contours) {
         const auto start = contour.start();
-        stack.push_back(start.x - current.x);
-        stack.push_back(start.y - current.y);
+        stack.push_back(start.x - current.x());
+        stack.push_back(start.y - current.y());
         flush(rmoveto);
-        current = start;
+        current = {start.x, start.y};
         auto segments = contour.segments();
         if (std::holds_alternative<LineSegment>(segments.back())) segments.pop_back();
         for (const auto &segment : segments) {
             if (const auto *line = std::get_if<LineSegment>(&segment)) {
-                queue(rlineto, {line->end.x - current.x, line->end.y - current.y}, 24);
-                current = line->end;
+                queue(rlineto, {line->end.x - current.x(), line->end.y - current.y()}, 24);
+                current = {line->end.x, line->end.y};
             } else {
                 const auto &c = std::get<CubicSegment>(segment);
-                queue(rrcurveto, {c.c1.x - current.x, c.c1.y - current.y, c.c2.x - c.c1.x, c.c2.y - c.c1.y,
+                queue(rrcurveto, {c.c1.x - current.x(), c.c1.y - current.y(), c.c2.x - c.c1.x, c.c2.y - c.c1.y,
                                   c.end.x - c.c2.x, c.end.y - c.c2.y}, 8);
-                current = c.end;
+                current = {c.end.x, c.end.y};
             }
         }
         if (pending) flush(std::uint8_t(pending));

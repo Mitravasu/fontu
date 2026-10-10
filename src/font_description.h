@@ -2,6 +2,7 @@
 #include "project.h"
 #include <QDateTime>
 #include <QString>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -13,10 +14,27 @@ namespace fontu {
 // Font units, y-up, origin at the drawing-area left edge on the baseline.
 // describeFont keeps |x| and |y| at most 16383 so every delta between two
 // points fits the int16 operands of a Type 2 charstring and of glyf later.
+template<int Minimum, int Maximum>
+class FontUnits {
+public:
+    static constexpr int maximum = Maximum;
+    static std::optional<FontUnits> rounded(double value) {
+        const auto whole = std::round(value);
+        if (!(whole >= Minimum && whole <= Maximum)) return {};
+        return FontUnits(int(whole));
+    }
+    operator int() const { return value_; }
+private:
+    explicit FontUnits(int value) : value_(value) {}
+    int value_;
+};
+using FontCoordinate = FontUnits<-16383, 16383>;
+using FontAdvance = FontUnits<0, 16383>;
+
 struct FontPoint {
-    std::int16_t x;
-    std::int16_t y;
-    friend bool operator==(FontPoint a, FontPoint b) { return a.x == b.x && a.y == b.y; }
+    FontCoordinate x;
+    FontCoordinate y;
+    friend bool operator==(FontPoint a, FontPoint b) { return int(a.x) == int(b.x) && int(a.y) == int(b.y); }
     friend bool operator!=(FontPoint a, FontPoint b) { return !(a == b); }
 };
 struct LineSegment { FontPoint end; };
@@ -41,7 +59,7 @@ private:
 
 struct FontGlyph {
     QString name;
-    std::uint16_t advance;
+    FontAdvance advance;
     std::vector<Contour> contours;
 };
 
@@ -56,11 +74,10 @@ struct GlyphOrder {
 };
 
 struct LineMetrics {
-    std::int16_t ascender;
-    std::int16_t descender;
-    std::int16_t lineGap;
-    std::int16_t xHeight;
-    std::int16_t capHeight;
+    FontCoordinate ascender;
+    FontCoordinate descender;
+    FontCoordinate xHeight;
+    FontCoordinate capHeight;
 };
 
 struct FontNames {
