@@ -8,6 +8,44 @@
 namespace fontu {
 namespace {
 constexpr double geometryScale = 16;
+QPainterPath canonicalVertices(QPainterPath path) {
+    constexpr double precision = 1e9;
+    for (int i = 0; i < path.elementCount(); ++i) {
+        const auto element = path.elementAt(i);
+        path.setElementPositionAt(i, std::round(element.x * precision) / precision,
+                                  std::round(element.y * precision) / precision);
+    }
+    const auto retraces = [](const QPointF &a, const QPointF &b, const QPointF &c) {
+        const auto u = b - a, v = c - b;
+        if (QPointF::dotProduct(u, v) >= 0) return false;
+        const auto longest = std::max({QLineF(a, b).length(), QLineF(b, c).length(), QLineF(a, c).length()});
+        return std::abs(u.x() * v.y() - u.y() * v.x()) <= (2 / precision) * longest;
+    };
+    QPainterPath boundary;
+    boundary.setFillRule(path.fillRule());
+    for (auto polygon : path.toSubpathPolygons()) {
+        if (!polygon.empty() && polygon.front() == polygon.back()) polygon.removeLast();
+        std::vector<QPointF> vertices;
+        for (const auto point : polygon) {
+            if (!vertices.empty() && vertices.back() == point) continue;
+            while (vertices.size() >= 2 && retraces(vertices[vertices.size() - 2], vertices.back(), point))
+                vertices.pop_back();
+            if (vertices.empty() || vertices.back() != point) vertices.push_back(point);
+        }
+        std::size_t begin = 0, end = vertices.size();
+        while (end - begin >= 3) {
+            if (vertices[begin] == vertices[end - 1]) { --end; continue; }
+            if (retraces(vertices[end - 1], vertices[begin], vertices[begin + 1])) { ++begin; continue; }
+            if (retraces(vertices[end - 2], vertices[end - 1], vertices[begin])) { --end; continue; }
+            break;
+        }
+        if (end - begin < 3) continue;
+        boundary.moveTo(vertices[begin]);
+        for (auto i = begin + 1; i < end; ++i) boundary.lineTo(vertices[i]);
+        boundary.closeSubpath();
+    }
+    return boundary;
+}
 bool closedFill(const Shape &shape) {
     if (shape.paint != ShapePaint::Filled) return false;
     QPointF start, end;
@@ -136,7 +174,7 @@ ShapeBuilder::ShapeBuilder(const Document &document) {
     const auto scale = QTransform::fromScale(geometryScale, geometryScale);
     for (const auto &shape : document.shapes()) {
         if (!document.isSelected(shape.id) || !closedFill(shape)) continue;
-        const auto path = scale.map(shape.path);
+        const auto path = scale.map(shape.path).simplified();
         auto uncovered = path;
         std::vector<ShapeRegion> partition;
         for (const auto &region : regions_) {
@@ -150,7 +188,7 @@ ShapeBuilder::ShapeBuilder(const Document &document) {
         regions_ = std::move(partition);
     }
     const auto inverse = QTransform::fromScale(1 / geometryScale, 1 / geometryScale);
-    for (auto &region : regions_) region.path = inverse.map(region.path);
+    for (auto &region : regions_) region.path = canonicalVertices(inverse.map(region.path));
 }
 std::optional<std::size_t> ShapeBuilder::hit(const QPointF &point) const {
     for (std::size_t i = 0; i < regions_.size(); ++i)
@@ -183,7 +221,7 @@ bool ShapeBuilder::apply(Document &document, const std::vector<std::size_t> &tou
         });
         if (entirelyConsumed) paths.push_back(region.path);
     }
-    if (!merged.isEmpty()) paths.push_back(merged.simplified());
+    if (!merged.isEmpty()) paths.push_back(canonicalVertices(merged.simplified()));
     return document.replaceShapes(consumed, paths);
 }
 }

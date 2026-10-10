@@ -3,6 +3,7 @@
 #include "viewport.h"
 #include "snapping.h"
 #include <QtTest>
+#include <algorithm>
 #include <limits>
 #include <cmath>
 using namespace fontu;
@@ -85,6 +86,81 @@ private slots:
         ShapeBuilder coincident(duplicate);
         QCOMPARE(coincident.regions().size(), std::size_t(1));
         QCOMPARE(coincident.regions()[0].sources.size(), std::size_t(2));
+    }
+    void builderCurvedCapsuleMergeHasNoDisconnectedSeam_data() {
+        QTest::addColumn<double>("dx");
+        QTest::addColumn<double>("dy");
+        QTest::newRow("integer") << 0.0 << 0.0;
+        QTest::newRow("fractional") << 1.48 << 0.76;
+    }
+    void builderCurvedCapsuleMergeHasNoDisconnectedSeam() {
+        QFETCH(double, dx);
+        QFETCH(double, dy);
+        Document document;
+        document.addPath(makeShape(ShapeKind::Rectangle, {-250 + dx, -150, 380, 800}));
+        const auto capsule = makePenPath({{{-280, 50 + dy}, {}}, {{110 + dx, 50 + dy}, {}},
+                                         {{240 + dx, 200 + dy}, {0, 100}}, {{110 + dx, 350 + dy}, {}},
+                                         {{-280, 350 + dy}, {}}, {{-400, 200 + dy}, {0, -100}}}, true);
+        document.addPath(capsule, ShapePaint::Filled);
+        document.selectAll();
+        ShapeBuilder builder(document);
+        auto touched = builder.crossed({-340, 200}, {200, 200});
+        for (const auto index : builder.crossed({200, 200}, {-50, 500}))
+            if (std::find(touched.begin(), touched.end(), index) == touched.end()) touched.push_back(index);
+        for (const auto index : builder.crossed({-50, 500}, {-50, -50}))
+            if (std::find(touched.begin(), touched.end(), index) == touched.end()) touched.push_back(index);
+        QVERIFY(builder.apply(document, touched, BuilderOperation::Combine));
+        QCOMPARE(document.shapes().size(), std::size_t(1));
+        ShapeBuilder merged(document);
+        QCOMPARE(merged.regions().size(), std::size_t(1));
+        QCOMPARE(merged.hit({0, 200}), merged.hit({200, 200}));
+        QVERIFY(merged.hit({0, 500}));
+        QVERIFY(merged.hit({0, -50}));
+        const auto path = document.shapes()[0].path;
+        QVERIFY(merged.apply(document, {*merged.hit({0, 200})}, BuilderOperation::Combine));
+        QCOMPARE(document.shapes()[0].path, path);
+    }
+    void builderRepeatedPartialMergeHasNoRetracedEdges() {
+        Document document;
+        document.addPath(makeShape(ShapeKind::Rectangle, {-76, 0, 189, 440.5}));
+        document.addPath(makeShape(ShapeKind::Rectangle, {-233, 126, 471.5, 157}));
+        document.addPath(makeShape(ShapeKind::Ellipse, {-139, 0, 315, 440.5}));
+        document.selectAll();
+        ShapeBuilder first(document);
+        QVERIFY(first.apply(document, {1, 2, 5, 6, 8, 10, 11, 12, 14}, BuilderOperation::Combine));
+        document.addPath(translated(document.shapes().back().path, {-47.5, 44}));
+        document.selectAll();
+        ShapeBuilder second(document);
+        QVERIFY(second.apply(document, {1, 2, 3, 4, 5, 6, 10, 11}, BuilderOperation::Combine));
+        document.selectAll();
+        ShapeBuilder third(document);
+        const auto touched = third.crossed({-140, 128}, {86, 58});
+        QVERIFY(third.apply(document, touched, BuilderOperation::Combine));
+        QCOMPARE(document.shapes().size(), std::size_t(4));
+        const auto covered = [&](QPointF point) {
+            return std::any_of(document.shapes().begin(), document.shapes().end(), [&](const Shape &shape) {
+                return shape.path.contains(point);
+            });
+        };
+        QVERIFY(covered({0, 200}));
+        QVERIFY(covered({0, 10}));
+        QVERIFY(covered({-200, 200}));
+        QVERIFY(covered({230, 200}));
+        QVERIFY(!covered({160, 400}));
+        QVERIFY(!covered({-220, 430}));
+        for (const auto &shape : document.shapes()) {
+            for (auto polygon : shape.path.toSubpathPolygons()) {
+                if (polygon.front() == polygon.back()) polygon.removeLast();
+                for (int i = 0; i < polygon.size(); ++i) {
+                    const auto a = polygon[(i + polygon.size() - 1) % polygon.size()];
+                    const auto b = polygon[i], c = polygon[(i + 1) % polygon.size()];
+                    const auto u = b - a, v = c - b;
+                    const auto cross = u.x() * v.y() - u.y() * v.x();
+                    QVERIFY2(std::abs(cross) >= 1e-7 || QPointF::dotProduct(u, v) >= -1e-6,
+                             "Committed filled boundary contains a zero-area retraced edge");
+                }
+            }
+        }
     }
     void builderEllipseBoundaryRemainsWithinSubpixelBandAtMaximumZoom() {
         Document document;
