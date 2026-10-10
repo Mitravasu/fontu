@@ -118,6 +118,38 @@ private slots:
         QCOMPARE(result.warnings[0].kind, ExportWarningKind::ShapeFlattened);
         QCOMPARE(warningText(result.warnings[0]), QString("“x”: a self-intersecting shape was converted to straight segments."));
     }
+    void windingShapeWithSeparateSubpathsKeepsItsCurves() {
+        QPainterPath path;
+        path.setFillRule(Qt::WindingFill);
+        path.addRect(-400, 0, 100, 100);
+        path.addEllipse(0, 0, 200, 200);
+        const auto result = described(project({{{{1}, "i"}, {filled(1, path)}}}));
+        const auto &contours = result.font.glyphs.at(1).contours;
+        QCOMPARE(result.warnings.size(), std::size_t(0));
+        QCOMPARE(ends(contours.at(0)), (QList<QPoint>{{200, 0}, {200, 100}, {100, 100}, {100, 0}}));
+        QCOMPARE(contours.at(1).segments().size(), std::size_t(4));
+        QCOMPARE(at(std::get<CubicSegment>(contours.at(1).segments()[3]).end), QPoint(700, 100));
+    }
+    void windingShapeKeepsOnlyContoursThatBoundPaint() {
+        QPainterPath filledHole;
+        filledHole.setFillRule(Qt::WindingFill);
+        filledHole.addRect(-100, 0, 200, 200);
+        filledHole.addRect(-50, 50, 100, 100);
+        QPainterPath realHole;
+        realHole.setFillRule(Qt::WindingFill);
+        realHole.addRect(-100, 0, 200, 200);
+        realHole.addPolygon(QPolygonF{{-50, 50}, {-50, 150}, {50, 150}, {50, 50}});
+        realHole.closeSubpath();
+        const auto result = described(project({{{{1}, "o"}, {filled(1, filledHole)}}, {{{2}, "O"}, {filled(1, realHole)}}}));
+        const QList<QPoint> outer{{600, 0}, {600, 200}, {400, 200}, {400, 0}};
+        QCOMPARE(result.warnings.size(), std::size_t(0));
+        QCOMPARE(result.font.glyphs.at(1).contours.size(), std::size_t(1));
+        QCOMPARE(ends(result.font.glyphs.at(1).contours.at(0)), outer);
+        const auto &ring = result.font.glyphs.at(2).contours;
+        QCOMPARE(ring.size(), std::size_t(2));
+        QCOMPARE(ends(ring.at(0)), outer);
+        QCOMPARE(ends(ring.at(1)), (QList<QPoint>{{450, 150}, {550, 150}, {550, 50}, {450, 50}}));
+    }
     void labelPolicyMapsSingleScalarsOnly() {
         const auto result = described(project({
             {{{7}, "alternate zero"}, {}}, {{{8}, "0"}, {}}, {{{9}, "0"}, {}}, {{{10}, QString::fromUcs4(U"\U0001F600", 1)}, {}}}));

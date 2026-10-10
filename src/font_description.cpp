@@ -123,12 +123,11 @@ bool inside(const QPolygonF &inner, const QPolygonF &outer) {
 std::vector<Contour> shapeContours(const Shape &shape, Placement p, const ProjectGlyph &glyph,
                                    std::vector<ExportWarning> &warnings) {
     auto source = shape.path;
-    auto subpaths = subpathSegments(source, p);
-    if ((source.fillRule() == Qt::WindingFill && subpaths.size() > 1) || edgesCross(source)) {
+    if (edgesCross(source)) {
         source = source.simplified();
-        subpaths = subpathSegments(source, p);
         warnings.push_back({ExportWarningKind::ShapeFlattened, glyph.seed.id, glyph.seed.label, 1});
     }
+    auto subpaths = subpathSegments(source, p);
     std::vector<Contour> contours;
     std::vector<QPolygonF> polygons;
     int dropped = 0;
@@ -143,14 +142,23 @@ std::vector<Contour> shapeContours(const Shape &shape, Placement p, const Projec
         polygons.push_back(polygon);
     }
     if (dropped) warnings.push_back({ExportWarningKind::ContourDropped, glyph.seed.id, glyph.seed.label, dropped});
+    const auto direction = [&polygons](std::size_t i) { return signedArea(polygons[i]) > 0 ? 1 : -1; };
+    const auto painted = [&source](int enclosing, int winding) {
+        return source.fillRule() == Qt::WindingFill ? winding != 0 : enclosing % 2 == 1;
+    };
+    std::vector<Contour> boundaries;
     for (std::size_t i = 0; i < contours.size(); ++i) {
-        int depth = 0;
+        int enclosing = 1, winding = direction(i);
         for (std::size_t j = 0; j < contours.size(); ++j)
-            if (i != j && inside(polygons[i], polygons[j])) ++depth;
-        const bool counterclockwise = signedArea(polygons[i]) > 0;
-        if (counterclockwise != (depth % 2 == 0)) contours[i] = contours[i].reversed();
+            if (i != j && inside(polygons[i], polygons[j])) {
+                ++enclosing;
+                winding += direction(j);
+            }
+        const bool paintedInside = painted(enclosing, winding);
+        if (paintedInside == painted(enclosing - 1, winding - direction(i))) continue;
+        boundaries.push_back(paintedInside == (direction(i) > 0) ? contours[i] : contours[i].reversed());
     }
-    return contours;
+    return boundaries;
 }
 
 std::optional<char32_t> labelCodePoint(const QString &label) {
