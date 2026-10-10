@@ -1,4 +1,6 @@
 #include "font_export.h"
+#include <QRawFont>
+#include <QTemporaryDir>
 #include <QTimeZone>
 #include <QtTest>
 using namespace fontu;
@@ -192,6 +194,54 @@ private slots:
         QCOMPARE(head.mid(36, 8), QByteArray::fromHex("0064" "0000" "0384" "02bc"));
         QCOMPARE(table(bytes, "hmtx"), QByteArray::fromHex("03e80064" "03e801f4"));
         QCOMPARE(table(bytes, "maxp"), QByteArray::fromHex("00005000" "0002"));
+    }
+    void exportedFileLoadsInThePlatformRasterizer() {
+        QTemporaryDir directory;
+        const auto path = directory.filePath("Test Face.otf");
+        const auto stroke = makePenPath({{{-100, 0}, {}}, {{100, 100}, {}}});
+        const auto result = exportFont(path, project({
+            {{{1}, "A"}, {filled(1, makeShape(ShapeKind::Rectangle, {0, 0, 20, 30})), {2, stroke, ShapePaint::Stroke}}},
+            {{{2}, " "}, {}},
+            {{{3}, "O"}, {filled(1, ring()), filled(2, makeShape(ShapeKind::Rectangle, {-10, 90, 20, 20}))}},
+            {{{4}, "o"}, {filled(1, makeShape(ShapeKind::Ellipse, {-100, 0, 200, 200}))}}}), settings(), FontFormat::Otf);
+        const auto &report = std::get<FontExportReport>(result);
+        QCOMPARE(report.glyphCount, std::size_t(5));
+        QCOMPARE(report.warnings.size(), std::size_t(1));
+        QCOMPARE(report.warnings[0].kind, ExportWarningKind::StrokeSkipped);
+
+        QRawFont raw(path, 1000, QFont::PreferNoHinting);
+        QVERIFY(raw.isValid());
+        QCOMPARE(raw.familyName(), QString("Test Face"));
+        QCOMPARE(raw.unitsPerEm(), 1000.);
+        QCOMPARE(raw.glyphIndexesForString("A Oo"), (QList<quint32>{1, 2, 3, 4}));
+        QCOMPARE(raw.advancesForGlyphIndexes(QList<quint32>{1, 2, 3}), (QList<QPointF>{{1000, 0}, {1000, 0}, {1000, 0}}));
+        QCOMPARE(raw.pathForGlyph(1).boundingRect(), QRectF(500, -30, 20, 30));
+        QCOMPARE(raw.pathForGlyph(2).isEmpty(), true);
+        QCOMPARE(raw.pathForGlyph(4).boundingRect(), QRectF(400, -200, 200, 200));
+        auto o = raw.pathForGlyph(3);
+        o.setFillRule(Qt::WindingFill);
+        QCOMPARE(o.boundingRect(), QRectF(400, -200, 200, 200));
+        QCOMPARE(o.contains(QPointF(410, -100)), true);
+        QCOMPARE(o.contains(QPointF(500, -100)), true);
+        QCOMPARE(o.contains(QPointF(470, -70)), false);
+    }
+    void nonThousandUnitsPerEmScalesThroughTheFontMatrix() {
+        QTemporaryDir directory;
+        const auto path = directory.filePath("Wide.otf");
+        auto p = project({{{{1}, "A"}, {filled(1, makeShape(ShapeKind::Rectangle, {0, 0, 1024, 512}))}}});
+        p.definition.unitsPerEm = 2048;
+        p.definition.bounds = QRectF(-1024, -512, 2048, 2048);
+        QVERIFY(std::holds_alternative<FontExportReport>(exportFont(path, p, settings("Wide"), FontFormat::Otf)));
+        QRawFont raw(path, 2048, QFont::PreferNoHinting);
+        QVERIFY(raw.isValid());
+        QCOMPARE(raw.unitsPerEm(), 2048.);
+        QCOMPARE(raw.advancesForGlyphIndexes(QList<quint32>{1}).at(0).x(), 2048.);
+        QCOMPARE(raw.pathForGlyph(1).boundingRect(), QRectF(1024, -512, 1024, 512));
+    }
+    void exportFailureReportsTheFileError() {
+        const auto result = exportFont("/nonexistent-fontu-folder/x.otf", project({{{{1}, "A"}, {}}}), settings(), FontFormat::Otf);
+        QVERIFY(std::holds_alternative<QString>(result));
+        QVERIFY(!QFile::exists("/nonexistent-fontu-folder/x.otf"));
     }
 };
 QTEST_MAIN(FontExportTests)
