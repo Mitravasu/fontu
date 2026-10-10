@@ -13,7 +13,7 @@ Users enable snapping to the visible grid, shape geometry, or both from the tool
 
 ## How to get to it (user POV)
 
-- Click `To grid` or `To shape geometry` in the toolbar's Snap group.
+- Click `To grid` or `To geometry + guides` in the toolbar's Snap group.
 - Toggle either button independently. Both start off.
 - Draw, move, or resize near a grid or geometry target while an option is enabled.
 
@@ -28,9 +28,9 @@ Run `.agents/skills/verify-fontu/helpers/control-fontu snapping --evidence /tmp/
 - Resize the production window to 800 by 600, capture the toolbar, and toggle each Snap button on and off. Assert that both buttons are visible and inside the toolbar.
 - Restore 1100 by 760 and capture the toolbar.
 - Click `To grid`, selected by `snapToGrid`. Only grid is enabled.
-- Click `To shape geometry`, selected by `snapToGeometry`. Both options are enabled.
+- Click `To geometry + guides`, selected by `snapToGeometry`. Both options are enabled.
 - Click `To grid` again. Only geometry is enabled.
-- Click `To shape geometry` again. Both options are off.
+- Click `To geometry + guides` again. Both options are off.
 - Select Rectangle from the production toolbar and draw a target rectangle. With geometry enabled, hover near its outline and assert the amber circle before pressing. Enable grid too and assert the same nearer geometry target.
 - Disable grid, draw from that hover point, and assert the new bounds start at the previewed geometry target.
 - Switch to grid only and hover near a visible intersection. Assert its amber circle before pressing. Each hover checks that document count, selection, and the selected path are unchanged.
@@ -45,3 +45,11 @@ This command proves the toggle UI, drawing hover markers for grid/geometry/both,
 - The edited shape is excluded from its own geometry targets.
 - Bounds snap points can lie inside shapes or at ellipse bounds corners.
 - Changing an option cancels an unfinished geometry edit.
+
+## Guide intersection regression
+
+Run `control-fontu intersection-snapping --evidence /private/tmp/fontu-proof-intersections-01` from the helper directory, or use the full helper path from the repository root. Use a new evidence directory.
+
+The recipe creates x-height at 497 font units through the creation form. The value differs from visible grid rows. It checks Rectangle hover and draw starts at the origin crossing and grid crossings. It also draws a rectangle, moves its corner to each crossing, undoes the move, and resizes that corner to the same crossing. It also checks continuous guide snaps away from crossings, all four Snap combinations, the radial eight-pixel threshold, and crossings after pan and wheel zoom. The final creation disables x-height through its checkbox and checks that its crossing disappears.
+
+This recipe uses Qt events in the production window. Native OS input and the other resize handles remain unverified. Core tests cover axis-constrained intersection eligibility, exact threshold behavior, off-crossing sliding, and nearer shape and grid targets during grouped move selection.

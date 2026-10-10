@@ -1,6 +1,6 @@
 # Navigating the canvas
 
-Users zoom around the pointer and pan an unbounded canvas. Reset view returns the initial view while preserving document geometry.
+Users zoom around the pointer and pan around a bounded glyph document. Reset view fits the complete document while preserving document geometry.
 
 ## Sub-features
 
@@ -28,7 +28,7 @@ Run `.agents/skills/verify-fontu/helpers/control-fontu navigation --evidence /tm
 - Send a wheel event with angle delta `+120` at `(200,150)`. The displayed zoom becomes 120 percent and the assertion reads zoom 1.2.
 - Middle-drag `(500,350)` to `(530,370)`. Rendered shape bounds shift by `(30,20)`.
 - Hold Space, left-drag `(500,350)` to `(520,360)`, then release Space. Rendered bounds shift by another `(20,10)`.
-- Click `Reset view (0)`. Zoom returns to 100 percent. Zoom again and press 0. Zoom is 1 and the stored shape path equals its original path.
+- Click `Reset view (0)`. The complete document fits. Zoom again and press 0. The fitted zoom returns and the stored shape path equals its original path.
 - Require the final `PASS:` record, exit zero, rendered evidence, and completed cleanup in `run.json`.
 
 For full navigation coverage, add production-window assertions for pointer anchoring, zoom limits, reset centering, editing after zoom/pan, and Escape during a held pan. Trackpad and native OS scroll delivery require a separate owned native instance.

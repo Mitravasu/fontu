@@ -6,9 +6,21 @@ Read the matching recipe before running `control-fontu`. Every run starts its ow
 
 Run commands from the repository root. Each named command builds, launches, checks readiness with doctor, exercises its scenario, captures screenshots and state, and cleans up. The helper injects Qt events into the unchanged production window. It does not send native OS input. See [the skill](../SKILL.md) for the evidence contract and cleanup checks.
 
-Each feature entry lists all known user controls, then separates the scripted coverage from the remaining checks. A pass for a shortcut does not prove its toolbar counterpart. Native input, trackpad, and focus behavior remain separate checks. There is no saving or font export in this milestone. Undo and Redo restore completed canvas edits and individual vertices in unfinished Pen paths.
+Each feature entry lists all known user controls, then separates the scripted coverage from the remaining checks. A pass for a shortcut does not prove its toolbar counterpart. Native input, trackpad, and focus behavior remain separate checks. Project saving is available. Font export remains absent. Undo and Redo restore completed canvas edits and individual vertices in unfinished Pen paths.
 
 ## Features
+
+- [Opaque preview](opaque-preview.md) covers the default X-ray view, toolbar and View menu toggles, black overlap fills, holes, open strokes, and unchanged document state.
+
+- [Shape Builder](shape-builder.md) covers Shift selection, hover, region extraction, sparse drag merge, Alt subtraction, cancellation, Undo and Redo, editing, and project round trips.
+
+- [Project creation](creation.md) covers startup, Custom Unicode paste, guide enablement, nondefault settings and saved drawings, dirty replacement choices, retained histories, and dimension endpoint fits.
+
+- [Project persistence](persistence.md) covers File actions, standard shortcuts, temporary file dialogs, all-glyph vector round trips, dirty Undo and Redo, invalid Open, and canceled transitions.
+
+- [Digit glyph selection](glyphs.md) covers the right-side picker, initial digit 0, per-glyph drawings and histories, canceled drafts and gestures, and scrolling at smaller height.
+
+- [Bounded glyph workspace](glyph.md) covers initial fit, typography guide snapping, hard drawing and editing bounds, bounded Pen controls, pan, zoom, and fitted Reset view.
 
 - [Drawing shapes](drawing.md) covers Rectangle and Ellipse toolbar/keyboard selection, drags, tiny-drag rejection, and Escape cancellation.
 - [Pen paths](pen.md) covers Pen toolbar/keyboard selection, lines, corners, symmetric cubic handles, Enter commit, click closure, filled interior selection, cancellation, draft navigation, snapping, and stroke editing.
@@ -16,7 +28,7 @@ Each feature entry lists all known user controls, then separates the scripted co
 - [Bottom status hints](status.md) covers initial tool hints, Pen closure hints through vertex Undo and Redo, completion and cancellation, draft navigation, and readability at 1100 and 800 pixels.
 - [Selecting and editing](editing.md) covers Select toolbar/keyboard, move, one corner resize, deselection, Delete, and Backspace. It lists remaining handle and rollback checks.
 - [Navigating the canvas](navigation.md) covers wheel events, both pan controls, and both Reset view controls. Native trackpad delivery remains unverified.
-- [Snapping](snapping.md) covers the two Snap toolbar toggles, all four toggle combinations, pre-press drawing hover targets, and a geometry-snapped drawing start. Move and resize effects require additional recipes.
+- [Snapping](snapping.md) covers the two Snap toolbar toggles, all four toggle combinations, pre-press drawing hover targets, and a geometry-snapped drawing start. The `intersection-snapping` recipe covers guide vertices during drawing, moving, and corner resizing, toggle eligibility, continuous guide snaps, and pan and zoom. Other move targets and resize handles require additional recipes.
 
 ## Proof reporting
 

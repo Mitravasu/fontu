@@ -10,7 +10,7 @@ The scenario drives these controls through the production window:
 4. Start another path. Press **Escape**, then **Enter**. Verify that the cancelled draft inserts nothing.
 5. Start a horizontal draft. Pan with the middle button and zoom with a wheel event. Press **Enter** and verify that the stored document points match the original draft.
 6. Enable **To grid** through the toolbar's Snap group before calculating canvas coordinates. Click near a grid intersection and drag a later anchor toward another intersection. Press **Enter** and verify the snapped anchors and reflected tangent control.
-7. Disable grid and enable **To shape geometry**. Click near both endpoints of a committed Pen line. Press **Enter** and verify the exact existing endpoints.
+7. Disable grid and enable **To geometry + guides**. Click near both endpoints of a committed Pen line. Press **Enter** and verify the exact existing endpoints.
 8. Start a draft, then click the Snap toolbar toggle to disable geometry snapping. Press **Enter** and verify that changing the snap option cancels the draft.
 9. Click **Select (V)**. Click a committed zigzag stroke, drag its body, and press **Delete**. Verify the selected shape ID, exact translation, and removal.
 10. Click **Pen (P)**. Try to close a two-anchor draft and verify that no shape commits. Cancel that draft with **Escape**.
