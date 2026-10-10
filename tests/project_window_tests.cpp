@@ -7,6 +7,12 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QComboBox>
+#include <QSpinBox>
+#include <QDoubleSpinBox>
+#include <QCheckBox>
+#include <QLineEdit>
+#include <QClipboard>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
@@ -74,6 +80,7 @@ void prepare(ProjectWindow &window) {
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     window.activateWindow();
+    QTest::mouseClick(window.findChild<QPushButton *>("createProject"), Qt::LeftButton);
     window.canvas().setFocus();
     QApplication::processEvents();
 }
@@ -81,6 +88,99 @@ void prepare(ProjectWindow &window) {
 class ProjectWindowTests : public QObject {
     Q_OBJECT
 private slots:
+    void startupCustomCreationAndOpen() {
+        QTemporaryDir directory;
+        ProjectWindow window(nullptr, directory.filePath("fontu"));
+        window.resize(800, 600); window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QVERIFY(!window.hasProject());
+        QVERIFY(!window.findChild<QAction *>("saveProject")->isEnabled());
+        auto *create = window.findChild<QPushButton *>("createProject");
+        auto *set = window.findChild<QComboBox *>("characterSet");
+        set->setCurrentIndex(3);
+        QTest::mouseClick(create, Qt::LeftButton);
+        QVERIFY(!window.hasProject());
+        QVERIFY(window.findChild<QLabel *>("creationError")->text().contains("at least one"));
+        window.findChild<QLineEdit *>("customCharacters")->setText(QString::fromUtf8("A😀Aé😀 "));
+        window.findChild<QSpinBox *>("workspaceWidth")->setValue(1200);
+        window.findChild<QSpinBox *>("workspaceHeight")->setValue(1400);
+        window.findChild<QSpinBox *>("unitsPerEm")->setValue(2048);
+        window.findChild<QDoubleSpinBox *>("xHeight")->setValue(480);
+        window.findChild<QCheckBox *>("xHeightEnabled")->setChecked(false);
+        QTest::mouseClick(create, Qt::LeftButton);
+        QApplication::processEvents();
+        QVERIFY(window.hasProject());
+        QCOMPARE(window.canvas().glyphs().size(), std::size_t(4));
+        QCOMPARE(window.findChild<QListWidget *>("glyphPicker")->item(3)->text(), QString("Space"));
+        QCOMPARE(window.canvas().document().definition().bounds, QRectF(-600, -350, 1200, 1400));
+        QCOMPARE(window.canvas().document().definition().unitsPerEm, 2048.);
+        QVERIFY(!window.canvas().document().definition().guideEnabled.xHeight);
+        draw(window.canvas());
+        chooseFile(directory.filePath("custom.fontu")); QVERIFY(window.saveProject());
+        ProjectWindow reopened(nullptr, directory.filePath("fontu"));
+        reopened.resize(800, 600); reopened.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&reopened));
+        chooseFile(directory.filePath("custom.fontu"));
+        QTest::mouseClick(reopened.findChild<QPushButton *>("welcomeOpen"), Qt::LeftButton);
+        QVERIFY(reopened.hasProject());
+        QCOMPARE(projectBytes(reopened.canvas().projectSnapshot()), projectBytes(window.canvas().projectSnapshot()));
+        QVERIFY(reopened.close()); QVERIFY(window.close());
+    }
+    void oversizedCustomPasteIsRejected() {
+        QTemporaryDir directory;
+        ProjectWindow window(nullptr, directory.filePath("fontu"));
+        window.show(); QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.findChild<QComboBox *>("characterSet")->setCurrentIndex(3);
+        auto *field = window.findChild<QLineEdit *>("customCharacters");
+        const auto pasted = QString(200000, QChar('a')) + 'b';
+        QApplication::clipboard()->setText(pasted);
+        shortcut(field, QKeySequence::Paste);
+        QCOMPARE(field->text(), pasted);
+        QTest::mouseClick(window.findChild<QPushButton *>("createProject"), Qt::LeftButton);
+        QVERIFY(!window.hasProject());
+        QVERIFY(window.findChild<QLabel *>("creationError")->text().contains("200000"));
+        QVERIFY(window.close());
+    }
+    void newCancellationPreservesHistoryAndDirtyGates() {
+        QTemporaryDir directory;
+        ProjectWindow window(nullptr, directory.filePath("fontu")); prepare(window);
+        draw(window.canvas());
+        window.canvas().setActiveGlyph({2}); draw(window.canvas());
+        const auto before = projectBytes(window.canvas().projectSnapshot());
+        const auto view = window.canvas().viewport().transform();
+        window.newProject(); QApplication::processEvents();
+        QVERIFY(!window.findChild<QAction *>("saveProject")->isEnabled());
+        auto *create = window.findChild<QPushButton *>("createProject");
+        const auto undoBinding = QKeySequence::keyBindings(QKeySequence::Undo).front()[0];
+        QTest::keyClick(create, Qt::Key(undoBinding.key()), undoBinding.keyboardModifiers());
+        QCOMPARE(projectBytes(window.canvas().projectSnapshot()), before);
+        window.findChild<QDoubleSpinBox *>("ascender")->setValue(900);
+        QTest::mouseClick(create, Qt::LeftButton);
+        QVERIFY(window.findChild<QLabel *>("creationError")->text().contains("Ascender"));
+        QCOMPARE(projectBytes(window.canvas().projectSnapshot()), before);
+        window.findChild<QDoubleSpinBox *>("ascender")->setValue(750);
+        choosePrompt(QMessageBox::Cancel); QTest::mouseClick(create, Qt::LeftButton);
+        QCOMPARE(projectBytes(window.canvas().projectSnapshot()), before);
+        choosePrompt(QMessageBox::Save, [] { chooseFile({}, true); }); QTest::mouseClick(create, Qt::LeftButton);
+        QCOMPARE(projectBytes(window.canvas().projectSnapshot()), before);
+        QVERIFY(window.projectPath().isEmpty());
+        QTest::mouseClick(window.findChild<QPushButton *>("cancelCreation"), Qt::LeftButton);
+        QApplication::processEvents();
+        QCOMPARE(window.canvas().viewport().transform(), view);
+        QCOMPARE(window.canvas().activeGlyphId().value, std::uint64_t(2));
+        window.canvas().undo(); QCOMPARE(window.canvas().document().shapes().size(), std::size_t(0));
+        window.canvas().redo(); QCOMPARE(projectBytes(window.canvas().projectSnapshot()), before);
+        window.newProject(); choosePrompt(QMessageBox::Save, [&] { chooseFile(directory.filePath("old.fontu")); });
+        QTest::mouseClick(create, Qt::LeftButton);
+        QVERIFY(QFile::exists(directory.filePath("old.fontu")));
+        QVERIFY(window.projectPath().isEmpty()); QVERIFY(!window.isProjectDirty());
+        QCOMPARE(window.canvas().glyphs().size(), std::size_t(10));
+        QVERIFY(!window.canvas().canUndo());
+        draw(window.canvas()); window.newProject();
+        choosePrompt(QMessageBox::Discard); QTest::mouseClick(create, Qt::LeftButton);
+        QCOMPARE(window.canvas().document().shapes().size(), std::size_t(0));
+        QVERIFY(!window.isProjectDirty()); QVERIFY(window.close());
+    }
     void saveDirtyUndoAndShortcuts() {
         QTemporaryDir directory;
         ProjectWindow window(nullptr, directory.filePath("fontu"));
@@ -124,7 +224,6 @@ private slots:
         QFile invalid(directory.filePath("invalid.fontu"));
         QVERIFY(invalid.open(QIODevice::WriteOnly)); invalid.write("invalid"); invalid.close();
         ProjectWindow window(nullptr, directory.filePath("fontu"));
-        addGlyphPanel(window, window.canvas());
         prepare(window);
         chooseFile(directory.filePath("load.fontu"));
         shortcut(&window.canvas(), QKeySequence::Open);

@@ -22,9 +22,19 @@ QDockWidget *addGlyphPanel(QMainWindow &window, Canvas &canvas) {
         const QSignalBlocker blocker(list);
         list->clear();
         for (const auto &glyph : canvas.glyphs()) {
-            auto *item = new QListWidgetItem(glyph.label, list);
+            auto display = glyph.label;
+            auto tooltip = glyph.label;
+            const auto scalars = glyph.label.toUcs4();
+            if (scalars.size() == 1) {
+                const auto scalar = scalars.front();
+                const auto code = "U+" + QString::number(scalar, 16).toUpper().rightJustified(4, '0');
+                tooltip = code + " " + glyph.label;
+                if (QChar::isSpace(scalar) || !QChar::isPrint(scalar))
+                    display = scalar == 0x20 ? QStringLiteral("Space") : code;
+            }
+            auto *item = new QListWidgetItem(display, list);
             item->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(glyph.id.value));
-            item->setToolTip(glyph.label);
+            item->setToolTip(tooltip);
             item->setSizeHint(QSize(120, 48));
             auto font = item->font();
             font.setPointSize(20);

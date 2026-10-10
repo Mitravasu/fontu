@@ -1,4 +1,6 @@
 #include "project.h"
+#include "project_creation.h"
+#include "snapping.h"
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -26,6 +28,110 @@ ProjectSnapshot fixture() {
 class ProjectTests : public QObject {
     Q_OBJECT
 private slots:
+    void creationCoverageAndUnicode() {
+        ProjectCreationDefinition request;
+        auto result = createProject(request);
+        QVERIFY(std::holds_alternative<ProjectSnapshot>(result));
+        auto project = std::get<ProjectSnapshot>(result);
+        QCOMPARE(project.glyphs.size(), std::size_t(10));
+        QCOMPARE(project.glyphs.front().seed.label, QString("0"));
+        QCOMPARE(project.glyphs.back().seed.label, QString("9"));
+        request.coverage = BuiltinCharacters::Letters;
+        project = std::get<ProjectSnapshot>(createProject(request));
+        QString letters;
+        for (const auto &glyph : project.glyphs) letters += glyph.seed.label;
+        QCOMPARE(letters, QString("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"));
+        request.coverage = BuiltinCharacters::Programming;
+        project = std::get<ProjectSnapshot>(createProject(request));
+        QCOMPARE(project.glyphs.size(), std::size_t(95));
+        for (std::size_t i = 0; i < project.glyphs.size(); ++i) {
+            QCOMPARE(project.glyphs[i].seed.label, QString(QChar(char16_t(0x20 + i))));
+            QCOMPARE(project.glyphs[i].seed.id.value, std::uint64_t(i + 1));
+        }
+        request.coverage = CustomCharacters{QString::fromUtf8("A😀Aé😀é \n") + QChar(0)};
+        project = std::get<ProjectSnapshot>(createProject(request));
+        QCOMPARE(project.glyphs.size(), std::size_t(8));
+        QCOMPARE(project.glyphs[1].seed.label, QString::fromUtf8("😀"));
+        QCOMPARE(project.glyphs[2].seed.label, QString::fromUtf8("é"));
+        QCOMPARE(project.glyphs[4].seed.label, QString::fromUtf8("́"));
+        QCOMPARE(project.glyphs[7].seed.label, QString(QChar(0)));
+        const auto roundtrip = parseProject(projectBytes(project));
+        QVERIFY(std::holds_alternative<ProjectSnapshot>(roundtrip));
+        QCOMPARE(projectBytes(std::get<ProjectSnapshot>(roundtrip)), projectBytes(project));
+    }
+    void creationValidationAndPresets() {
+        for (const auto &preset : creationPresets()) {
+            auto result = createProject({preset.definition, BuiltinCharacters::Numbers});
+            QVERIFY(std::holds_alternative<ProjectSnapshot>(result));
+        }
+        const auto roomy = std::get<ProjectSnapshot>(createProject({creationPresets()[2].definition, BuiltinCharacters::Letters}));
+        QCOMPARE(roomy.definition.bounds, QRectF(-600, -350, 1200, 1400));
+        QCOMPARE(roomy.definition.unitsPerEm, 1000.);
+        QCOMPARE(roomy.definition.ascender, 750.);
+        auto request = ProjectCreationDefinition{};
+        const auto rejected = [](const ProjectCreationDefinition &r) { return std::holds_alternative<CreationError>(createProject(r)); };
+        request.coverage = CustomCharacters{};
+        QVERIFY(rejected(request));
+        request.coverage = CustomCharacters{QString(QChar(0xd800))};
+        QVERIFY(rejected(request));
+        request.coverage = CustomCharacters{QString(QChar(0xdc00))};
+        QVERIFY(rejected(request));
+        QString excessive;
+        for (char32_t c = 0x1000; c < 0x2001; ++c) excessive += QString::fromUcs4(&c, 1);
+        request.coverage = CustomCharacters{excessive};
+        QVERIFY(rejected(request));
+        request.coverage = CustomCharacters{QString(200001, QChar('a'))};
+        QVERIFY(rejected(request));
+        request = {};
+        request.definition.guideEnabled.ascender = false;
+        request.definition.ascender = 751;
+        QVERIFY(rejected(request));
+        request = {};
+        request.definition.unitsPerEm = 1000.5;
+        QVERIFY(rejected(request));
+        request = {};
+        request.definition.bounds = {-7.5, -250, 15, 1000};
+        QVERIFY(rejected(request));
+        request = {};
+        request.definition.baseline = std::numeric_limits<double>::quiet_NaN();
+        QVERIFY(rejected(request));
+        for (const double extent : {16., 8192.}) {
+            request = {};
+            auto &d = request.definition;
+            d.bounds = {-extent / 2, -extent / 4, extent, extent};
+            d.unitsPerEm = extent;
+            d.descender = -extent / 4; d.baseline = 0; d.xHeight = extent / 2;
+            d.capHeight = extent * .7; d.ascender = extent * .75;
+            const auto accepted = createProject(request);
+            QVERIFY(std::holds_alternative<ProjectSnapshot>(accepted));
+            QCOMPARE(std::get<ProjectSnapshot>(accepted).definition.bounds.width(), extent);
+        }
+    }
+    void optionalGuidesRoundtripAndSnapping() {
+        auto project = fixture();
+        project.definition.guideEnabled = {false, true, false, true, false};
+        const auto loaded = std::get<ProjectSnapshot>(parseProject(projectBytes(project)));
+        QVERIFY(!loaded.definition.guideEnabled.baseline);
+        QVERIFY(loaded.definition.guideEnabled.xHeight);
+        QVERIFY(!loaded.definition.guideEnabled.capHeight);
+        QCOMPARE(projectBytes(loaded), projectBytes(project));
+        auto root = QJsonDocument::fromJson(projectBytes(project)).object();
+        auto definition = root["definition"].toObject();
+        definition.remove("guideEnabled"); root["definition"] = definition;
+        const auto legacy = std::get<ProjectSnapshot>(parseProject(QJsonDocument(root).toJson()));
+        for (const auto &guide : legacy.definition.guides()) QVERIFY(guide.enabled);
+        definition["guideEnabled"] = QJsonObject{{"baseline", "false"}}; root["definition"] = definition;
+        QVERIFY(std::holds_alternative<QString>(parseProject(QJsonDocument(root).toJson())));
+        GlyphDocumentDefinition d;
+        d.guideEnabled.xHeight = false;
+        Viewport view;
+        Document hidden(d, {});
+        QVERIFY(!snapPoint(view.toScreen({123, 502}), hidden, view, {false, true}));
+        d.guideEnabled.xHeight = true;
+        const auto snapped = snapPoint(view.toScreen({123, 502}), Document(d, {}), view, {false, true});
+        QVERIFY(snapped);
+        QCOMPARE(view.toDocument(snapped->point), QPointF(123, 500));
+    }
     void roundTripPreservesProjectAndGeometry() {
         const auto original = fixture();
         const auto result = parseProject(projectBytes(original));

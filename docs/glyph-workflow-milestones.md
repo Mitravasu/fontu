@@ -4,7 +4,7 @@ The intended workflow starts with an Inkscape-like new-document screen. Designer
 
 ## Milestone 1. Bounded glyph workspace and metric guides
 
-This slice introduces one `GlyphDocumentDefinition` owned by `Document`. Rendering, guide snapping, and tool constraints read that definition. The values remain fixed for this slice. The bounded workspace is implemented. The digit glyph picker is delivered as an early part of milestone 3. The configurable welcome screen remains planned.
+This slice introduces one `GlyphDocumentDefinition` owned by `Document`. Rendering, guide snapping, and tool constraints read that definition. The values remain fixed for this slice. The bounded workspace is implemented. The digit glyph picker is delivered as an early part of milestone 3. The configurable welcome screen is now delivered in milestone 2.
 
 The provisional example uses a 1000 by 1000 font-unit workspace. Its horizontal span is -500 through 500, and its vertical span is -250 through 750. The existing viewport preserves upward-positive font coordinates. The font coordinate scale is 1000 units per em. These two uses of 1000 describe different concepts.
 
@@ -20,17 +20,17 @@ The workspace width is not an advance width. Glyph identity is now explicit and 
 
 ## Milestone 2. New-document screen and presets
 
-Build the configurable entry screen after the fixed canvas behavior is verified. Provide meaningful size presets, including a 1000 by 1000 glyph-design example, with explicit width and height controls. Record approximately 5000 units per dimension as a proposed upper workspace limit. Validate that limit and its usability before making it a product rule.
+The entry screen is implemented with Classic 1000, 2048 UPM, and Roomy 1000 examples, explicit width and height, and independent UPM. Dimensions accept 16 through 8192 whole font units. Production proof checks fit and drawing at both endpoints in an 800 by 600 window. See [project creation](project-creation.md) for exact settings and transition rules.
 
 The user described dimensions in pixels. The glyph editor stores font units, while the viewport converts them to logical screen pixels according to zoom. A 1000 by 1000 workspace does not request a 1000 by 1000 raster export. If a later workflow needs pixel dimensions, label that mode explicitly and keep raster output size separate from font scale.
 
-Allow designers to select and customize baseline, x-height, cap height, ascender, and descender guides. Add optional overshoot bands and custom guides when their behavior is implemented. Keep guide visibility and guide snapping explicit. Distinguish font-wide guide settings from glyph-specific geometry and spacing, as the domain reference requires. The new-document screen creates the same typed definition the renderer and snapping already consume.
+Designers can select and customize baseline, x-height, cap height, ascender, and descender guides. Add optional overshoot bands and custom guides when their behavior is implemented. Keep guide visibility and guide snapping explicit. Distinguish font-wide guide settings from glyph-specific geometry and spacing, as the domain reference requires. The new-document screen creates the same typed definition the renderer and snapping already consume.
 
 ## Milestone 3. Character coverage and glyph selection
 
-The first delivered selection slice uses an explicit digits 0 through 9 collection. A scrolling right-side Glyphs panel starts on 0. Each record owns its completed Document, selection, and edit history. Switching cancels unfinished drafts and gestures and retains the shared viewport, tool, and Snap settings. The collection API accepts arbitrary stable IDs and labels. There is no configurable character-set screen yet. See [the digit design](digit-glyph-design.md).
+The first delivered selection slice uses an explicit digits 0 through 9 collection. A scrolling right-side Glyphs panel starts on 0. Each record owns its completed Document, selection, and edit history. Switching cancels unfinished drafts and gestures and retains the shared viewport, tool, and Snap settings. The collection API accepts arbitrary stable IDs and labels. The creation screen now selects Numbers, Letters, Programming, or Custom coverage. See [the digit design](digit-glyph-design.md).
 
-Offer sets for letters, numbers, programming characters, and custom characters. Define exact coverage for each preset rather than relying on ambiguous names. A programming set can include punctuation and symbols used in source code. A custom set accepts a deliberate list of characters.
+Numbers provides ten digits. Letters provides 52 ASCII letters in uppercase then lowercase order. Programming provides all 95 printable ASCII characters, including space. Custom deduplicates Unicode scalars in first-appearance order. Exact coverage and input limits are recorded in [project creation](project-creation.md).
 
 Create a selectable glyph collection from the chosen coverage. Preserve each glyph's own drawing when the designer changes selection. Model glyph identity separately from Unicode mappings. Account for glyphs without Unicode, multiple mappings, `.notdef`, and the empty space glyph. Do not equate one typed character with one glyph in the domain model.
 
@@ -38,7 +38,7 @@ Create a selectable glyph collection from the chosen coverage. Preserve each gly
 
 The save and reopen slice is implemented. File actions preserve the ordered collection, every completed drawing, stable IDs, labels, shared guide definition, workspace bounds, and UPM in versioned `.fontu` JSON. Dirty indicators and Save, Discard, or Cancel gates protect completed work. See [the persistence design](project-persistence-design.md).
 
-An editor for shared guides and UPM remains planned. Add glyph advance width and derived sidebearings without tying spacing changes to workspace size. Define how changing workspace bounds affects existing outlines before supporting that operation. Add save and reopen behavior that preserves guide settings, coverage, glyph geometry, and spacing. The broader [font studio proposal](font_studio_proposal.md) governs preview, components, kerning, and export beyond this flow.
+Creation configures shared guides and UPM. Editing those values in an existing project remains planned. Add glyph advance width and derived sidebearings without tying spacing changes to workspace size. Define how changing workspace bounds affects existing outlines before supporting that operation. Add save and reopen behavior that preserves guide settings, coverage, glyph geometry, and spacing. The broader [font studio proposal](font_studio_proposal.md) governs preview, components, kerning, and export beyond this flow.
 
 ## Current verification evidence
 

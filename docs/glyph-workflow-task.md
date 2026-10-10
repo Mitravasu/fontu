@@ -137,3 +137,18 @@ The final persistence proof is `/private/tmp/fontu-persistence-proof-20261010-05
 First Save's exact default folder, automatic suffix, canceled saving, failed saving, and Save on Close use event-driven window tests with an injected temporary folder. The production recipe first opens a temporary project and writes only inside its evidence directory. It does not create the user's Documents folder for proof.
 
 The proofs inject Qt events into the unchanged production main window with the offscreen backend. Native OS input, macOS global menu delivery, native dialog appearance, trackpad delivery, and desktop focus remain unverified. Projects reopen without transient selections, drafts, or undo history. No autosave, recent files, startup screen, export, commit, rebase, or PR was added.
+
+
+## Configurable project creation delivered
+
+Startup now shows one scrollable creation page with always-reachable Create and Open buttons. File New retains the accepted Canvas, and Back preserves completed drawings, active glyph, selection, history, and viewport. The page accepts workspace dimensions, independent UPM, five editable optional guides, and Numbers, Letters, Programming, or Custom coverage. [Project creation](project-creation.md) records exact settings and limits.
+
+A pure creation factory constructs the accepted snapshot. The shared definition drives bounds, guide rendering, Geometry snapping, and version-1 persistence. Optional guide flags default to true for older files. Validation runs before dirty replacement. Save, Discard, and Cancel preserve the existing transition contract.
+
+Independent review found that the multiline text widget converted nonbreaking spaces and line separators. Custom now uses a single-line field that preserves exact pasted Unicode scalars. The field retains one unit beyond the 200000-unit policy limit so oversized input produces a validation error instead of an accepted truncated collection. Actual clipboard-paste regression and independent mixed-scalar probes pass.
+
+The final four CTest suites pass in `/private/tmp/fontu-creation-build-20261010`, and `git diff --check` is clean. Independent production creation proof is `/private/tmp/fontu-creation-review-final-20261010/production`. It captures 55 screenshots, including `02.png` for startup at 800 by 600, `06.png` for the Custom form, and `07.png` for configured bounds and mixed guide enablement. Rectangle events prove that a disabled x-height does not snap and an enabled cap-height does. Save As and Open preserve exact settings, supplementary characters, nonbreaking space, U+2028, and drawings. Dirty Create Save, Discard, and Cancel, Back history retention, legacy guide defaults, and drawing at 16 and 8192 dimension endpoints all pass.
+
+Final persistence regression is `/private/tmp/fontu-creation-persistence-proof-20261010-03`. Final Snap regression is `/private/tmp/fontu-creation-snapping-proof-20261010-02`. All three runs end in PASS with exit zero, 21 source hashes matching the final source, child reaping, scratch removal, and preserved evidence. The audit is `/private/tmp/fontu-creation-work-20261010/final-evidence.json`.
+
+These proofs inject Qt events into the unchanged production main window with the offscreen backend. Native macOS input, accessibility, global menu delivery, trackpad delivery, native dialog appearance, and desktop focus remain unverified. No commit, push, pull request, merge, or export was made.

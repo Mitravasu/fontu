@@ -16,7 +16,14 @@ QPainterPath makeShape(ShapeKind kind, const QRectF &bounds);
 QPainterPath translated(const QPainterPath &path, const QPointF &delta);
 QPainterPath resized(const QPainterPath &path, const QRectF &bounds);
 
-struct TypographyGuide { const char *name; double position; };
+struct GuideEnablement {
+    bool baseline = true;
+    bool xHeight = true;
+    bool capHeight = true;
+    bool ascender = true;
+    bool descender = true;
+};
+struct TypographyGuide { const char *name; double position; bool enabled = true; };
 struct GlyphDocumentDefinition {
     QRectF bounds{-500, -250, 1000, 1000};
     double unitsPerEm = 1000;
@@ -25,6 +32,7 @@ struct GlyphDocumentDefinition {
     double capHeight = 700;
     double ascender = 750;
     double descender = -250;
+    GuideEnablement guideEnabled;
     std::array<TypographyGuide, 5> guides() const;
     QPointF constrainPoint(const QPointF &point) const;
     QPointF constrainTranslation(const QRectF &source, const QPointF &delta) const;

@@ -1,8 +1,8 @@
 # fontu
 
-A native Qt 6 / C++ vector canvas for font creation. Milestone 1 supports rectangles, ellipses, open pen paths, filled closed pen shapes, selection, movement, eight resize handles, deletion, undo and redo, a grid, a bounded glyph workspace, labeled typography guides, optional snapping to the grid and shape geometry or guides, zoom, and pan. Geometry remains editable paths in document space. The right Glyphs panel starts with digits 0 through 9. Each glyph retains its completed drawing, selection, and Undo/Redo history when you switch.
+A native Qt 6 / C++ vector canvas for font creation. Milestone 1 supports rectangles, ellipses, open pen paths, filled closed pen shapes, selection, movement, eight resize handles, deletion, undo and redo, a grid, a bounded glyph workspace, labeled typography guides, optional snapping to the grid and shape geometry or guides, zoom, and pan. Geometry remains editable paths in document space. Startup offers a configurable creation page or Open for saved projects. The right Glyphs panel contains the chosen Numbers, Letters, Programming, or Custom character set. Each glyph retains its completed drawing, selection, and Undo/Redo history when you switch.
 
-The fixed workspace is 1000 by 1000 font units at 1000 UPM. Startup and Reset view fit the document. Drawing and editing stop at its bounds while pan and zoom remain available outside it. [Glyph workflow milestones](docs/glyph-workflow-milestones.md) records the planned new-document screen, configurable presets and guides, and character sets.
+The creation page offers example presets, workspace dimensions, independent units per em, and selectable typography guides with editable values. Classic defaults to 1000 by 1000 font units at 1000 UPM. Creation and Reset view fit the document. Drawing and editing stop at its bounds while pan and zoom remain available outside it. See [project creation](docs/project-creation.md) for exact ranges, character coverage, and replacement behavior.
 
 ## Build and launch
 
@@ -26,6 +26,7 @@ On Linux, run `./build/fontu`. On Windows, run `build/Debug/fontu.exe` or the ex
 
 | Action | Control |
 | --- | --- |
+| New project | File menu or the platform New shortcut, Command+N on macOS and Ctrl+N elsewhere |
 | Open project | File menu or the platform Open shortcut, Command+O on macOS and Ctrl+O elsewhere |
 | Save project | File menu or Command+S on macOS and Ctrl+S elsewhere |
 | Save project as | File menu or the platform Save As shortcut |
@@ -66,7 +67,7 @@ Snapping starts with both options off. Enable either option or both in the toolb
 
 Use **File > Save** to save the entire glyph collection as a `.fontu` project. First Save opens the platform Documents folder's `fontu` subfolder. The app creates that folder when the first Save dialog opens. Later saves use the same filename. **Save As** selects another file. **Open** restores the collection, drawings, shared document bounds, typography guides, units per em, and active glyph. Reopened projects start with empty Undo and Redo history.
 
-The title marks unsaved content with an asterisk, and the status bar shows **Unsaved changes**. Undo back to the saved content clears the indicator. Open and Close ask whether to Save, Discard, or Cancel. Canceling or failing to save retains the current project. Invalid project files show an error without replacing completed work.
+The title marks unsaved content with an asterisk, and the status bar shows **Unsaved changes**. Undo back to the saved content clears the indicator. Open, accepted New, and Close ask whether to Save, Discard, or Cancel. Canceling or failing to save retains the current project. Invalid project files show an error without replacing completed work.
 
 File actions cancel unfinished Pen drafts and roll back unfinished pointer edits. Finish a Pen path before saving. Tool changes, selection, snapping, pan, and zoom do not mark a project dirty. See [the project persistence design](docs/project-persistence-design.md) for the versioned format and validation rules.
 
@@ -77,9 +78,10 @@ File actions cancel unfinished Pen drafts and roll back unfinished pointer edits
 - `src/canvas.*` paints paths, an adaptive grid, and fixed-screen-size handles, and handles gestures. Move/resize updates derive from the original path snapshot. Pen drafts store document-space anchors and tangents until committed. Canvas owns stable glyph records, each with its own Document, before/after snapshots, and history cursor. A single active record drives rendering and editing.
 - `src/snapping.*` queries grid and path targets in screen space, excludes the edited shape by ID, and returns the nearest eligible target.
 - `src/glyph_panel.*` derives a scrolling glyph picker from Canvas metadata and keeps its selected row synchronized.
+- `src/project_creation.*` validates creation settings and builds complete snapshots. `src/creation_page.*` collects workspace, guides, and character choices.
 - `src/project.*` defines typed project snapshots, validates versioned JSON, and writes atomically with QSaveFile.
-- `src/project_window.*` owns File actions, dialogs, the saved baseline, dirty indicators, and Open and Close gates.
-- `src/snap_menu.*` adds the two independent toolbar snap actions; `src/main.cpp` creates the native window and tool actions.
+- `src/project_window.*` owns creation and editor pages, toolbar actions, dialogs, the saved baseline, dirty indicators, and New, Open, and Close gates.
+- `src/snap_menu.*` adds the two independent toolbar snap actions; `src/main.cpp` starts the native ProjectWindow.
 
 The [typography domain reference](docs/typography_domain_reference.md) defines font terminology. The [terminology audit](docs/terminology-audit.md) records how it applies to the current canvas.
 

@@ -10,6 +10,8 @@ Each feature entry lists all known user controls, then separates the scripted co
 
 ## Features
 
+- [Project creation](creation.md) covers startup, Custom Unicode paste, guide enablement, nondefault settings and saved drawings, dirty replacement choices, retained histories, and dimension endpoint fits.
+
 - [Project persistence](persistence.md) covers File actions, standard shortcuts, temporary file dialogs, all-glyph vector round trips, dirty Undo and Redo, invalid Open, and canceled transitions.
 
 - [Digit glyph selection](glyphs.md) covers the right-side picker, initial digit 0, per-glyph drawings and histories, canceled drafts and gestures, and scrolling at smaller height.

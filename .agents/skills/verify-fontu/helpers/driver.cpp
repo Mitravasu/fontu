@@ -3,6 +3,9 @@
 #include FONTU_MAIN
 #undef main
 #include <QTimer>
+#include <QToolBar>
+#include <QStatusBar>
+#include <QAction>
 #include <QTest>
 #include <QMenu>
 #include <QMenuBar>
@@ -18,6 +21,14 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QLabel>
+#include <QComboBox>
+#include <QSpinBox>
+#include <QDoubleSpinBox>
+#include <QCheckBox>
+#include <QLineEdit>
+#include <QClipboard>
+#include <QScrollArea>
+#include <QInputMethodEvent>
 #include <stdexcept>
 
 namespace {
@@ -53,6 +64,16 @@ void record(const QString &action) {
         {"grid",canvas->gridSnapEnabled()},{"geometry",canvas->geometrySnapEnabled()},
         {"canUndo",canvas->canUndo()},{"canRedo",canvas->canRedo()},{"zoom",canvas->viewport().zoom()},{"screenshot",stem + ".png"}};
     state.insert("activeGlyphId", double(canvas->activeGlyphId().value));
+    const auto &definition=canvas->document().definition();
+    state.insert("bounds",QJsonArray{definition.bounds.x(),definition.bounds.y(),definition.bounds.width(),definition.bounds.height()});
+    state.insert("unitsPerEm",definition.unitsPerEm);
+    QJsonArray guides;
+    for(const auto &guide:definition.guides()) guides.append(QJsonObject{{"name",guide.name},{"position",guide.position},{"enabled",guide.enabled}});
+    state.insert("guides",guides);
+    QJsonArray labels;
+    for(const auto &glyph:canvas->glyphs()) labels.append(glyph.label);
+    state.insert("glyphLabels",labels);
+    state.insert("creationVisible",window->findChild<QWidget *>("creationPage")->isVisible());
     state.insert("controlsHint", window->statusBar()->currentMessage());
     for(auto *menu : window->findChildren<QMenu *>()) {
         if(menu->isVisible()) {
@@ -544,6 +565,141 @@ void persistence() {
     prompt(QMessageBox::Cancel); require(!window->close() && window->isVisible(), "Close Cancel failed");
     record("Unsaved Close Cancel keeps production window open");
 }
+void formField(const QString &name, const QString &text) {
+    auto *field=window->findChild<QAbstractSpinBox *>(name);
+    require(field,"creation number control missing");
+    window->findChild<QScrollArea *>("creationScroll")->ensureWidgetVisible(field);
+    QTest::mouseClick(field,Qt::LeftButton);
+    QTest::keyClick(field,Qt::Key_A,Qt::ControlModifier);
+    QTest::keyClicks(field,text); QTest::keyClick(field,Qt::Key_Tab);
+}
+void chooseCoverage(int index) {
+    auto *combo=window->findChild<QComboBox *>("characterSet");
+    window->findChild<QScrollArea *>("creationScroll")->ensureWidgetVisible(combo);
+    QTest::keyClick(combo,Qt::Key_Home);
+    for(int i=0;i<index;++i) QTest::keyClick(combo,Qt::Key_Down);
+    QApplication::processEvents();
+}
+void customText(const QString &text) {
+    auto *editor=window->findChild<QLineEdit *>("customCharacters");
+    window->findChild<QScrollArea *>("creationScroll")->ensureWidgetVisible(editor);
+    editor->setFocus(); QTest::keyClick(editor,Qt::Key_A,Qt::ControlModifier);
+    QApplication::clipboard()->setText(text);
+    const auto binding=QKeySequence::keyBindings(QKeySequence::Paste).front()[0];
+    QTest::keyClick(editor,Qt::Key(binding.key()),binding.keyboardModifiers());
+    QApplication::processEvents();
+    require(editor->text()==text,"Custom paste changed Unicode code points");
+}
+void createClick() {
+    QTest::mouseClick(window->findChild<QPushButton *>("createProject"),Qt::LeftButton);
+    QApplication::processEvents();
+}
+void creation() {
+    auto *projectWindow=qobject_cast<fontu::ProjectWindow *>(window);
+    window->resize(800,600); QApplication::processEvents();
+    require(window->findChild<QPushButton *>("welcomeOpen")->isVisible(),"startup Open missing at 800 pixels");
+    record("Welcome at 800 by 600 with reachable Create and Open");
+    chooseCoverage(3); createClick();
+    require(!projectWindow->hasProject() && window->findChild<QLabel *>("creationError")->text().contains("at least one"),"empty Custom admitted");
+    record("Empty Custom rejected before project creation");
+    const auto old=output+"/legacy.fontu";
+    auto root=QJsonDocument::fromJson(fontu::projectBytes(canvas->projectSnapshot())).object();
+    auto definition=root["definition"].toObject(); definition.remove("guideEnabled"); root["definition"]=definition;
+    QFile legacy(old); require(legacy.open(QIODevice::WriteOnly),"legacy write failed"); legacy.write(QJsonDocument(root).toJson()); legacy.close();
+    fileChoice(old); QTest::mouseClick(window->findChild<QPushButton *>("welcomeOpen"),Qt::LeftButton);
+    require(projectWindow->hasProject(),"startup Open failed");
+    for(const auto &guide:canvas->document().definition().guides()) require(guide.enabled,"legacy guide default lost");
+    record("Welcome Open loads a version-1 project without guide flags");
+    fileMenu("newProject");
+    const auto retained=fontu::projectBytes(canvas->projectSnapshot());
+    const auto binding=QKeySequence::keyBindings(QKeySequence::Undo).front()[0];
+    auto *create=window->findChild<QPushButton *>("createProject");
+    QTest::keyClick(create,Qt::Key(binding.key()),binding.keyboardModifiers());
+    require(fontu::projectBytes(canvas->projectSnapshot())==retained,"hidden Undo changed retained project");
+    chooseCoverage(3); customText(QString::fromUtf8("A😀Aé😀 \n\u00a0\u2028"));
+    formField("workspaceWidth","1200"); formField("workspaceHeight","1400"); formField("unitsPerEm","2048");
+    formField("xHeight","480"); formField("capHeight","690"); formField("ascender","1100");
+    auto *xEnabled=window->findChild<QCheckBox *>("xHeightEnabled");
+    window->findChild<QScrollArea *>("creationScroll")->ensureWidgetVisible(xEnabled);
+    QTest::mouseClick(xEnabled,Qt::LeftButton,Qt::NoModifier,QPoint(8,xEnabled->height()/2));
+    require(!xEnabled->isChecked(),"x-height toggle failed");
+    createClick();
+    require(window->findChild<QWidget *>("creationPage")->isVisible() && window->findChild<QLabel *>("creationError")->text().contains("Ascender"),"invalid guide admitted");
+    formField("ascender","800"); record("Custom creation values and disabled x-height; invalid guide rejected");
+    createClick();
+    const auto &d=canvas->document().definition();
+    require(d.bounds==QRectF(-600,-350,1200,1400) && d.unitsPerEm==2048 && d.xHeight==480 && d.capHeight==690
+        && d.ascender==800 && !d.guideEnabled.xHeight,"creation settings ignored");
+    require(canvas->glyphs().size()==7 && canvas->glyphs()[1].label==QString::fromUtf8("😀")
+        && canvas->glyphs()[3].label==" " && canvas->glyphs()[4].label=="\n" && canvas->glyphs()[5].label==QString(QChar(0xa0))
+        && canvas->glyphs()[6].label==QString(QChar(0x2028)),"Custom scalar order or dedup wrong");
+    const auto page=canvas->viewport().transform().mapRect(d.bounds);
+    require(canvas->rect().contains(page.toAlignedRect()),"configured page does not fit final editor layout");
+    const auto guideInk=[&](double position) {
+        const auto picture=canvas->grab().toImage();
+        const auto y=canvas->viewport().toScreen({0,position}).toPoint().y(); int count=0;
+        const auto left=canvas->viewport().toScreen({-400,0}).toPoint().x();
+        const auto right=canvas->viewport().toScreen({-100,0}).toPoint().x();
+        for(int x=left;x<=right;++x) for(int line=y-1;line<=y+1;++line)
+            if(picture.pixelColor(x,line)==QColor("#a7b2c8")) ++count;
+        return count;
+    };
+    require(guideInk(480)==0 && guideInk(690)>20,"guide rendering does not match enablement");
+    record("Configured bounds fit at 800 by 600; hidden x-height absent and enabled cap guide visible");
+    window->resize(1100,760); QApplication::processEvents(); toolbar("Reset view (0)");
+    if(canvas->gridSnapEnabled()) snap("snapToGrid");
+    if(!canvas->geometrySnapEnabled()) snap("snapToGeometry");
+    toolbar("Rectangle (R)");
+    const auto screen=[](QPointF point){return canvas->viewport().toScreen(point).toPoint();};
+    drag(screen({123,482}),screen({190,530}));
+    const auto hiddenBounds=canvas->document().shapes().back().path.boundingRect();
+    require(std::abs(hiddenBounds.top()-480)>1,"disabled x-height still snapped");
+    const auto target=screen({200,690}); hover(target+QPoint(0,2),target,"Enabled cap-height guide");
+    drag(target+QPoint(0,2),screen({270,620}));
+    require(std::abs(canvas->document().shapes().back().path.boundingRect().bottom()-690)<1e-7,"enabled cap guide did not snap");
+    record("Actual Rectangle gestures ignore disabled x-height and snap to enabled cap height");
+    auto *picker=window->findChild<QListWidget *>("glyphPicker");
+    QTest::mouseClick(picker->viewport(),Qt::LeftButton,Qt::NoModifier,picker->visualItemRect(picker->item(1)).center());
+    drag(screen({-100,100}),screen({-20,180}));
+    toolbar("Undo"); require(canvas->document().shapes().empty(),"custom glyph Undo failed");
+    toolbar("Redo"); require(canvas->document().shapes().size()==1,"custom glyph Redo failed");
+    const auto before=fontu::projectBytes(canvas->projectSnapshot());
+    const auto path=output+"/custom.fontu"; fileChoice(path); fileMenu("saveProjectAs");
+    require(projectWindow->projectPath()==path && !projectWindow->isProjectDirty(),"custom Save failed");
+    fileChoice(path); fileMenu("openProject");
+    require(fontu::projectBytes(canvas->projectSnapshot())==before,"settings or glyph drawings lost on reopen");
+    record("Custom supplementary characters, drawings, mixed guides and exact metrics roundtrip through File Save As and Open");
+    toolbar("Rectangle (R)"); drag(screen({-250,200}),screen({-150,300}));
+    const auto dirty=fontu::projectBytes(canvas->projectSnapshot()); const auto view=canvas->viewport().transform();
+    fileMenu("newProject"); prompt(QMessageBox::Cancel); createClick();
+    require(fontu::projectBytes(canvas->projectSnapshot())==dirty && projectWindow->projectPath()==path,"New Cancel changed dirty project");
+    QTest::mouseClick(window->findChild<QPushButton *>("cancelCreation"),Qt::LeftButton); QApplication::processEvents();
+    require(canvas->viewport().transform()==view && canvas->canUndo(),"page Cancel lost view or history");
+    record("Dirty Create Cancel and Back to project retain filename, drawings, view and history");
+    fileMenu("newProject"); prompt(QMessageBox::Save); createClick();
+    const auto saved=fontu::readProject(path);
+    require(std::holds_alternative<fontu::ProjectSnapshot>(saved)
+        && fontu::projectBytes(std::get<fontu::ProjectSnapshot>(saved))==dirty,"New Save lost retained drawings");
+    require(!projectWindow->isProjectDirty() && projectWindow->projectPath().isEmpty(),"New Save did not create clean project");
+    record("Dirty Create Save writes previous project before accepting replacement");
+    toolbar("Rectangle (R)"); drag(screen({-200,100}),screen({-100,200}));
+    fileMenu("newProject"); prompt(QMessageBox::Discard); createClick();
+    require(!projectWindow->isProjectDirty() && projectWindow->projectPath().isEmpty() && !canvas->canUndo(),"New Discard failed");
+    for(const int extent:{16,8192}) {
+        fileMenu("newProject");
+        formField("workspaceWidth",QString::number(extent)); formField("workspaceHeight",QString::number(extent));
+        formField("descender",QString::number(-extent/4.)); formField("baseline","0");
+        formField("xHeight",QString::number(extent/2.)); formField("capHeight",QString::number(extent*.7));
+        formField("ascender",QString::number(extent*.75)); chooseCoverage(0);
+        window->resize(800,600); QApplication::processEvents(); createClick();
+        const auto fitted=canvas->viewport().transform().mapRect(canvas->document().definition().bounds);
+        require(canvas->rect().contains(fitted.toAlignedRect()),"dimension endpoint does not fit at 800 by 600");
+        toolbar("Rectangle (R)"); drag(screen({-extent*.2,extent*.1}),screen({-extent*.1,extent*.2}));
+        require(canvas->document().shapes().size()==1,"dimension endpoint drawing failed");
+        toolbar("Undo"); require(!projectWindow->isProjectDirty(),"endpoint Undo failed");
+        record(QString("Dimension %1 fits and draws at 800 by 600").arg(extent));
+    }
+}
 void run() {
     try {
         for(auto *widget : QApplication::topLevelWidgets()) {
@@ -551,16 +707,28 @@ void run() {
             if(candidate && qobject_cast<fontu::ProjectWindow *>(candidate)) window=candidate;
         }
         require(window && window->isVisible(),"production window not ready");
-        canvas=qobject_cast<fontu::Canvas *>(window->centralWidget());
+        auto *projectWindow=qobject_cast<fontu::ProjectWindow *>(window);
+        canvas=&projectWindow->canvas();
         require(canvas && canvas->document().shapes().empty(),"doctor: unexpected canvas");
         require(window->findChild<QToolBar *>() && window->findChild<QToolBar *>()->windowTitle()=="Shape tools" && window->findChild<QToolBar *>()->findChild<QAction *>("snapToGrid") && window->findChild<QToolBar *>()->findChild<QAction *>("snapToGeometry") && window->findChild<QAction *>("openProject") && window->findChild<QAction *>("saveProject") && window->findChild<QAction *>("saveProjectAs"),"doctor: production controls missing");
-        record("Doctor passed: fresh production window, toolbar, Snap controls, empty document");
-        if(feature != "glyph" && feature != "glyphs" && feature != "persistence") {
+        require(!projectWindow->hasProject() && window->findChild<QWidget *>("creationPage")->isVisible()
+                && window->findChild<QPushButton *>("welcomeOpen")->isVisible()
+                && !window->findChild<QAction *>("saveProject")->isEnabled(), "doctor: welcome controls missing");
+        record("Doctor passed: fresh production welcome, Create and Open, disabled Save, retained empty Canvas");
+        if(feature != "creation") {
+            QTest::mouseClick(window->findChild<QPushButton *>("createProject"),Qt::LeftButton);
+            QApplication::processEvents();
+            require(projectWindow->hasProject() && canvas->isVisible(), "default Create failed");
+            record("Create default Numbers project through welcome button");
+        }
+        if(feature != "glyph" && feature != "glyphs" && feature != "persistence" && feature != "creation") {
             window->resize(window->width()+1100-canvas->width(),window->height());
             QApplication::processEvents();
             legacyView();
         }
-        if(feature=="persistence") {
+        if(feature=="creation") {
+            creation();
+        } else if(feature=="persistence") {
             persistence();
         } else if(feature=="glyphs") {
             auto *picker = window->findChild<QListWidget *>("glyphPicker");

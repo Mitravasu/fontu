@@ -28,8 +28,9 @@ bool validPath(const QPainterPath &path) {
 }
 }
 std::array<TypographyGuide, 5> GlyphDocumentDefinition::guides() const {
-    return {{{"Ascender", ascender}, {"Cap height", capHeight}, {"x-height", xHeight},
-             {"Baseline", baseline}, {"Descender", descender}}};
+    return {{{"Ascender", ascender, guideEnabled.ascender}, {"Cap height", capHeight, guideEnabled.capHeight},
+             {"x-height", xHeight, guideEnabled.xHeight}, {"Baseline", baseline, guideEnabled.baseline},
+             {"Descender", descender, guideEnabled.descender}}};
 }
 QPointF GlyphDocumentDefinition::constrainPoint(const QPointF &point) const {
     return {std::clamp(point.x(), bounds.left(), bounds.right()),

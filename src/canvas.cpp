@@ -1,4 +1,5 @@
 #include "canvas.h"
+#include "project_creation.h"
 #include <QFocusEvent>
 #include <QKeyEvent>
 #include <QKeySequence>
@@ -27,8 +28,10 @@ QPen cosmeticPen(const QColor &color, double width = 1) {
 }
 }
 std::vector<GlyphSeed> digitGlyphs() {
-    return {{{1}, "0"}, {{2}, "1"}, {{3}, "2"}, {{4}, "3"}, {{5}, "4"},
-            {{6}, "5"}, {{7}, "6"}, {{8}, "7"}, {{9}, "8"}, {{10}, "9"}};
+    std::vector<GlyphSeed> result;
+    for (const auto c : builtinCharacterText(BuiltinCharacters::Numbers))
+        result.push_back({{std::uint64_t(result.size() + 1)}, QString(c)});
+    return result;
 }
 Canvas::Canvas(QWidget *parent) : Canvas(digitGlyphs(), parent) {}
 Canvas::Canvas(std::vector<GlyphSeed> glyphs, QWidget *parent) : QWidget(parent) {
@@ -250,6 +253,7 @@ void Canvas::paintEvent(QPaintEvent *) {
     painter.setPen(QPen(QColor("#8492a6"), 1));
     painter.drawRect(page);
     for (const auto &guide : definition.guides()) {
+        if (!guide.enabled) continue;
         const auto y = viewport_.toScreen({0, guide.position}).y();
         const bool baseline = guide.position == definition.baseline;
         QPen pen(baseline ? QColor("#5c6a91") : QColor("#a7b2c8"), baseline ? 1.5 : 1);
