@@ -31,13 +31,13 @@ Choose a new evidence directory for every invocation. The helper refuses an exis
 
 ## Doctor
 
-The helper's first operation is a read-only check within the instance it just started. It requires the visible `fontu • Shape canvas` production window, a Canvas central widget, the `Shape tools` toolbar, both Snap toggles, no menu bar, and an empty document. The first screenshot and state record capture that baseline. `run.json` records the owned PID, executable, Qt backend, feature, and source hashes.
+The helper's first operation is a read-only check within the instance it just started. It requires the visible `fontu • Shape canvas` production window, a Canvas central widget, the `Shape tools` toolbar, both Snap toggles, no menu bar, an empty active document, and the right-side Glyphs picker with digit 0 selected. The first screenshot and state record capture that baseline. `run.json` records the owned PID, executable, Qt backend, feature, and source hashes.
 
 If anything looks wrong, start a fresh helper run and inspect its first record, `run.json`, and logs before further driving. This short-lived app has no remote control port or attach command. Do not attach to the user's desktop instance.
 
 ## Drive
 
-`control-fontu` accepts `drawing`, `pen`, `editing`, `navigation`, `snapping`, `history`, and `status`. The `history` recipe exercises Undo and Redo buttons and Qt standard platform bindings. The `status` recipe checks bottom hints through Pen draft changes and at smaller window sizes. Each invocation starts a fresh empty document and executes the corresponding recipe in the feature map. Toolbar handles are their exact action text. Snap handles are `snapToGrid` and `snapToGeometry`. Canvas coordinates are logical pixels relative to the widget. The helper uses the production window's default 1100 by 760 sizing.
+`control-fontu` accepts `drawing`, `pen`, `editing`, `navigation`, `snapping`, `history`, `status`, `glyph`, and `glyphs`. The `history` recipe exercises Undo and Redo buttons and Qt standard platform bindings. The `status` recipe checks bottom hints through Pen draft changes and at smaller window sizes. Each invocation starts a fresh empty document and executes the corresponding recipe in the feature map. Toolbar handles are their exact action text. Snap handles are `snapToGrid` and `snapToGeometry`. Canvas coordinates are logical pixels relative to the widget. The helper uses the production window's default 1100 by 760 sizing.
 
 Snap and Pen runs click the production toolbar toggles. The snapping recipe checks visibility and toggling at 800 by 600, restores 1100 by 760, and proves all four toggle combinations. It also captures pre-press drawing hover circles and asserts that a drawn start matches the geometry target. The Pen recipe verifies anchor and handle snapping with exact path elements.
 

@@ -11,6 +11,11 @@ bool validBounds(const QRectF &bounds) {
         && std::isfinite(bounds.width()) && std::isfinite(bounds.height())
         && bounds.width() >= 0.001 && bounds.height() >= 0.001;
 }
+bool withinBounds(const QPainterPath &path, const QRectF &bounds) {
+    const auto tolerated = bounds.adjusted(-1e-7, -1e-7, 1e-7, 1e-7);
+    const auto ink = path.boundingRect();
+    return tolerated.contains(ink.topLeft()) && tolerated.contains(ink.bottomRight());
+}
 bool validPath(const QPainterPath &path) {
     for (int i = 0; i < path.elementCount(); ++i) {
         auto e = path.elementAt(i);
@@ -20,6 +25,26 @@ bool validPath(const QPainterPath &path) {
     return !path.isEmpty() && std::isfinite(bounds.width()) && std::isfinite(bounds.height())
         && (bounds.width() >= 0.001 || bounds.height() >= 0.001);
 }
+}
+std::array<TypographyGuide, 5> GlyphDocumentDefinition::guides() const {
+    return {{{"Ascender", ascender}, {"Cap height", capHeight}, {"x-height", xHeight},
+             {"Baseline", baseline}, {"Descender", descender}}};
+}
+QPointF GlyphDocumentDefinition::constrainPoint(const QPointF &point) const {
+    return {std::clamp(point.x(), bounds.left(), bounds.right()),
+            std::clamp(point.y(), bounds.top(), bounds.bottom())};
+}
+QPointF GlyphDocumentDefinition::constrainTranslation(const QRectF &source, const QPointF &delta) const {
+    return {std::clamp(delta.x(), bounds.left() - source.left(), bounds.right() - source.right()),
+            std::clamp(delta.y(), bounds.top() - source.top(), bounds.bottom() - source.bottom())};
+}
+QPointF GlyphDocumentDefinition::constrainTangent(const QPointF &anchor, const QPointF &tangent) const {
+    double scale = 1;
+    if (tangent.x() != 0)
+        scale = std::min(scale, std::min(anchor.x() - bounds.left(), bounds.right() - anchor.x()) / std::abs(tangent.x()));
+    if (tangent.y() != 0)
+        scale = std::min(scale, std::min(anchor.y() - bounds.top(), bounds.bottom() - anchor.y()) / std::abs(tangent.y()));
+    return tangent * std::clamp(scale, 0.0, 1.0);
 }
 QPainterPath makePenPath(const std::vector<PenAnchor> &anchors, bool closed) {
     QPainterPath path;
@@ -66,13 +91,13 @@ const Shape *Document::find(ShapeId id) const {
     return it == shapes_.end() ? nullptr : &*it;
 }
 std::optional<ShapeId> Document::addPath(const QPainterPath &path, ShapePaint paint) {
-    if (!validPath(path)) return {};
+    if (!validPath(path) || !withinBounds(path, definition_.bounds)) return {};
     const auto id = nextId_++;
     shapes_.push_back({id, path, paint});
     return id;
 }
 bool Document::replacePath(ShapeId id, const QPainterPath &path) {
-    if (!validPath(path)) return false;
+    if (!validPath(path) || !withinBounds(path, definition_.bounds)) return false;
     for (auto &shape : shapes_) {
         if (shape.id == id) { shape.path = path; return true; }
     }

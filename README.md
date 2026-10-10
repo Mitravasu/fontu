@@ -1,6 +1,8 @@
 # fontu
 
-A native Qt 6 / C++ vector canvas for font creation. Milestone 1 supports rectangles, ellipses, open pen paths, filled closed pen shapes, selection, movement, eight resize handles, deletion, undo and redo, a grid, optional snapping to the grid and shape geometry, zoom, and pan. Geometry remains editable paths in document space.
+A native Qt 6 / C++ vector canvas for font creation. Milestone 1 supports rectangles, ellipses, open pen paths, filled closed pen shapes, selection, movement, eight resize handles, deletion, undo and redo, a grid, a bounded glyph workspace, labeled typography guides, optional snapping to the grid and shape geometry or guides, zoom, and pan. Geometry remains editable paths in document space. The right Glyphs panel starts with digits 0 through 9. Each glyph retains its completed drawing, selection, and Undo/Redo history when you switch.
+
+The fixed workspace is 1000 by 1000 font units at 1000 UPM. Startup and Reset view fit the document. Drawing and editing stop at its bounds while pan and zoom remain available outside it. [Glyph workflow milestones](docs/glyph-workflow-milestones.md) records the planned new-document screen, configurable presets and guides, and character sets.
 
 ## Build and launch
 
@@ -35,13 +37,13 @@ On Linux, run `./build/fontu`. On Windows, run `build/Debug/fontu.exe` or the ex
 | Create a rectangle or ellipse | Drag with the left mouse button |
 | Select / move | Select tool, click a shape / drag its fill or outline |
 | Resize | Select tool, drag a corner or edge handle |
-| Snap to grid / shape geometry | Independent `To grid` and `To shape geometry` toggles beside Undo and Redo in the toolbar |
+| Snap to grid or geometry and guides | Independent `To grid` and `To geometry + guides` toggles beside Undo and Redo in the toolbar |
 | Delete selection | Delete or Backspace |
 | Undo | Toolbar or the platform Undo shortcut, Command+Z on macOS and Ctrl+Z on Windows/Linux |
 | Redo | Toolbar or the platform Redo shortcut, Command+Shift+Z on macOS and Ctrl+Y on Windows/Linux |
 | Zoom at pointer | Mouse wheel or vertical trackpad scroll |
 | Pan | Middle-button drag or hold Space and left-drag |
-| Reset view | Toolbar or 0 |
+| Fit the complete document | Reset view toolbar button or 0 |
 | Cancel an edit | Escape during a draw, move, resize, or pen draft |
 | Clear selection | Escape when idle or click empty canvas with Select |
 
@@ -51,6 +53,8 @@ With P, click anchors for straight segments. Drag a second or later anchor to cu
 
 Enter or Return finishes an open stroke with at least two anchors after mouse release. Select open strokes near their outlines. Both finish controls keep the Pen tool active. Hover previews the next segment; it does not add an anchor. Escape discards the entire unfinished path, including between clicks. Horizontal paths have left and right resize handles; vertical paths have top and bottom handles. Resizing preserves their collapsed axis.
 
+Switching glyphs cancels unfinished Pen drafts and geometry gestures. The canvas view, tools, and snapping stay shared. Clicking a glyph row returns keyboard focus to the canvas.
+
 Losing canvas focus, changing tools, resizing the canvas, or resetting the view cancels an unfinished geometry edit. Pen drafts survive zoom and pan. Escape during panning ends the gesture and keeps the current view. Resizing across the opposite edge normalizes the bounds without mirroring the path.
 
 Snapping starts with both options off. Enable either option or both in the toolbar's Snap group. Drawing snaps the start and end points; pen anchors and dragged handle endpoints use the same targets; moving snaps the shape's bounds corners, edge midpoints, or center; resizing snaps the dragged handle while keeping the opposite bounds fixed. Targets must be within eight logical screen pixels, so zoom does not change the capture distance. Grid targets use the visible adaptive grid intersections. Edge handles snap to grid lines on their adjustable axis. Shape geometry targets include actual path outlines and bounds snap points. An amber circle marks the winning target during a gesture. Changing a snap option cancels an unfinished edit.
@@ -59,8 +63,9 @@ Snapping starts with both options off. Enable either option or both in the toolb
 
 - `src/document.*` owns ordered shapes, stable IDs, and single selection. Each shape records whether it is filled or stroked. Shape geometry is a `QPainterPath` containing lines and cubic curves, with no widget or screen coordinates. Geometry functions construct and transform paths.
 - `src/viewport.*` maps an unbounded y-up document plane to y-down logical screen pixels, with cursor-anchored zoom. Rendering and input share this mapping.
-- `src/canvas.*` paints paths, an adaptive grid, and fixed-screen-size handles, and handles gestures. Move/resize updates derive from the original path snapshot. Pen drafts store document-space anchors and tangents until committed. Canvas owns before/after document snapshots for completed edits and a history cursor for undo and redo.
+- `src/canvas.*` paints paths, an adaptive grid, and fixed-screen-size handles, and handles gestures. Move/resize updates derive from the original path snapshot. Pen drafts store document-space anchors and tangents until committed. Canvas owns stable glyph records, each with its own Document, before/after snapshots, and history cursor. A single active record drives rendering and editing.
 - `src/snapping.*` queries grid and path targets in screen space, excludes the edited shape by ID, and returns the nearest eligible target.
+- `src/glyph_panel.*` derives a scrolling glyph picker from Canvas metadata and keeps its selected row synchronized.
 - `src/snap_menu.*` adds the two independent toolbar snap actions; `src/main.cpp` creates the native window and tool actions.
 
 The [typography domain reference](docs/typography_domain_reference.md) defines font terminology. The [terminology audit](docs/terminology-audit.md) records how it applies to the current canvas.

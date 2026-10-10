@@ -10,6 +10,10 @@ Each feature entry lists all known user controls, then separates the scripted co
 
 ## Features
 
+- [Digit glyph selection](glyphs.md) covers the right-side picker, initial digit 0, per-glyph drawings and histories, canceled drafts and gestures, and scrolling at smaller height.
+
+- [Bounded glyph workspace](glyph.md) covers initial fit, typography guide snapping, hard drawing and editing bounds, bounded Pen controls, pan, zoom, and fitted Reset view.
+
 - [Drawing shapes](drawing.md) covers Rectangle and Ellipse toolbar/keyboard selection, drags, tiny-drag rejection, and Escape cancellation.
 - [Pen paths](pen.md) covers Pen toolbar/keyboard selection, lines, corners, symmetric cubic handles, Enter commit, click closure, filled interior selection, cancellation, draft navigation, snapping, and stroke editing.
 - [Undo and redo](history.md) covers toolbar buttons, Qt standard shortcut bindings, edit transactions, Pen vertex history, redo invalidation, no-op preservation, and cancellation.

@@ -11,7 +11,7 @@ void addSnapControls(QToolBar &toolbar, Canvas &canvas) {
     grid->setObjectName("snapToGrid");
     grid->setCheckable(true);
     grid->setChecked(canvas.gridSnapEnabled());
-    auto *geometry = toolbar.addAction("To shape geometry");
+    auto *geometry = toolbar.addAction("To geometry + guides");
     geometry->setObjectName("snapToGeometry");
     geometry->setCheckable(true);
     geometry->setChecked(canvas.geometrySnapEnabled());

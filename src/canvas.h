@@ -7,19 +7,29 @@
 #include <utility>
 
 namespace fontu {
+struct GlyphId {
+    std::uint64_t value;
+    friend bool operator==(GlyphId a, GlyphId b) { return a.value == b.value; }
+};
+struct GlyphSeed { GlyphId id; QString label; };
+std::vector<GlyphSeed> digitGlyphs();
 enum class Tool { Select, Rectangle, Ellipse, Pen };
 class Canvas : public QWidget {
     Q_OBJECT
 public:
     explicit Canvas(QWidget *parent = nullptr);
-    const Document &document() const { return document_; }
+    Canvas(std::vector<GlyphSeed> glyphs, QWidget *parent = nullptr);
+    const Document &document() const { return activeGlyph().document; }
+    std::vector<GlyphSeed> glyphs() const;
+    GlyphId activeGlyphId() const { return activeGlyph().seed.id; }
+    bool setActiveGlyph(GlyphId id);
     const Viewport &viewport() const { return viewport_; }
     Tool tool() const { return tool_; }
     QString controlsHint() const;
     void setTool(Tool tool);
     void resetView();
-    bool canUndo() const { return hasPenHistory() ? !penDraft_.empty() : historyPosition_ > 0; }
-    bool canRedo() const { return hasPenHistory() ? !penRedo_.empty() : historyPosition_ < history_.size(); }
+    bool canUndo() const { return hasPenHistory() ? !penDraft_.empty() : activeGlyph().historyPosition > 0; }
+    bool canRedo() const { return hasPenHistory() ? !penRedo_.empty() : activeGlyph().historyPosition < activeGlyph().history.size(); }
     void undo();
     void redo();
     bool gridSnapEnabled() const { return snapOptions_.grid; }
@@ -27,6 +37,7 @@ public:
     void setGridSnapEnabled(bool enabled);
     void setGeometrySnapEnabled(bool enabled);
 signals:
+    void activeGlyphChanged();
     void toolChanged(Tool tool);
     void snapOptionsChanged();
     void historyChanged();
@@ -59,10 +70,17 @@ private:
     SnapOptions snapOptions_;
     std::optional<QPointF> snapMarker_;
     std::optional<QPointF> hoverPosition_;
-    Document document_;
     struct HistoryEntry { Document before; Document after; };
-    std::vector<HistoryEntry> history_;
-    std::size_t historyPosition_ = 0;
+    struct GlyphRecord {
+        GlyphSeed seed;
+        Document document;
+        std::vector<HistoryEntry> history;
+        std::size_t historyPosition = 0;
+    };
+    GlyphRecord &activeGlyph() { return glyphs_[activeGlyphIndex_]; }
+    const GlyphRecord &activeGlyph() const { return glyphs_[activeGlyphIndex_]; }
+    std::vector<GlyphRecord> glyphs_;
+    std::size_t activeGlyphIndex_ = 0;
     std::optional<Document> gestureBefore_;
     Viewport viewport_;
     Tool tool_ = Tool::Select;

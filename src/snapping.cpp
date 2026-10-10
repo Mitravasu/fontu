@@ -34,9 +34,13 @@ std::optional<SnapResult> snapPoint(const QPointF &point, const Document &docume
         QPointF target(std::round(doc.x() / step) * step, std::round(doc.y() / step) * step);
         if (axes == SnapAxes::Horizontal) target.setY(doc.y());
         if (axes == SnapAxes::Vertical) target.setX(doc.x());
-        consider(viewport.toScreen(target));
+        if (document.definition().bounds.contains(target)) consider(viewport.toScreen(target));
     }
     if (options.geometry) {
+        const auto docPoint = viewport.toDocument(point);
+        for (const auto &guide : document.definition().guides())
+            consider(viewport.toScreen({document.definition().constrainPoint(docPoint).x(), guide.position}));
+        consider(viewport.toScreen({0, document.definition().constrainPoint(docPoint).y()}));
         for (const auto &shape : document.shapes()) {
             if (excluded == shape.id) continue;
             const auto path = viewport.transform().map(shape.path);

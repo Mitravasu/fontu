@@ -7,6 +7,46 @@ using namespace fontu;
 class CoreTests : public QObject {
     Q_OBJECT
 private slots:
+    void boundedDocumentAdmission() {
+        Document document;
+        const auto id = document.addPath(makeShape(ShapeKind::Rectangle, {400, -250, 100, 100}));
+        QVERIFY(id);
+        QVERIFY(!document.addPath(makeShape(ShapeKind::Rectangle, {490, 0, 20, 20})));
+        QVERIFY(!document.replacePath(*id, translated(document.find(*id)->path, {1, 0})));
+        QCOMPARE(document.find(*id)->path.boundingRect(), QRectF(400, -250, 100, 100));
+        const auto line = document.addPath(makePenPath({{{-500, 750}, {}}, {{500, 750}, {}}}), ShapePaint::Stroke);
+        QVERIFY(line);
+        QCOMPARE(document.find(*line)->path.boundingRect(), QRectF(-500, 750, 1000, 0));
+        QPainterPath curve;
+        curve.moveTo(400, 0);
+        curve.cubicTo(550, 100, 550, 200, 400, 300);
+        QVERIFY(!document.addPath(curve, ShapePaint::Stroke));
+    }
+    void typographyGuideSnapping() {
+        Document document;
+        Viewport viewport;
+        viewport.reset({200, 800});
+        auto snap = snapPoint({313, 303}, document, viewport, {false, true});
+        QVERIFY(snap);
+        QCOMPARE(snap->point, QPointF(313, 300));
+        QVERIFY(!snapPoint({313, 303}, document, viewport, {}));
+        QVERIFY(!snapPoint({313, 303}, document, viewport, {true, false}));
+        QVERIFY(!snapPoint({313, 303}, document, viewport, {false, true}, {}, SnapAxes::Horizontal));
+        viewport.zoomAt({200, 800}, 0.5);
+        viewport.pan({80, -90});
+        snap = snapPoint({333, 363}, document, viewport, {false, true});
+        QVERIFY(snap);
+        QCOMPARE(snap->point, QPointF(333, 360));
+        QVERIFY(!snapPoint(viewport.toScreen({520, 503}), document, viewport, {false, true}));
+        viewport.reset({550,350});
+        viewport.zoomAt({312.5,267.3},0.62);
+        for (int i=0; i<7; ++i) viewport.zoomAt({301.2,253.7},1.1972173631218102);
+        viewport.pan({31.4,-18.9});
+        const auto boundary = viewport.toScreen({100,750});
+        snap = snapPoint(boundary + QPointF(0,2), document, viewport, {false,true});
+        QVERIFY(snap);
+        QVERIFY(QLineF(snap->point, boundary).length()<1e-7);
+    }
     void penStrokeGeometry() {
         Document document;
         Viewport view;
@@ -16,7 +56,7 @@ private slots:
         QVERIFY(id);
         QVERIFY(!document.hitTest({50, 25}, 3));
         QCOMPARE(document.hitTest({50, 100}, 3), id);
-        QVERIFY(!snapPoint({25, 0}, document, view, {false, true}));
+        QCOMPARE(snapPoint({25, 0}, document, view, {false, true})->point, QPointF(25, 0));
         auto snap = snapPoint({25, -50}, document, view, {false, true});
         QVERIFY(snap);
         QCOMPARE(snap->point, QPointF(25, -50));

@@ -12,6 +12,8 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QDir>
+#include <QListWidget>
+#include <QScrollBar>
 #include <stdexcept>
 
 namespace {
@@ -46,6 +48,7 @@ void record(const QString &action) {
         {"selected",canvas->document().selection() ? double(*canvas->document().selection()) : -1},
         {"grid",canvas->gridSnapEnabled()},{"geometry",canvas->geometrySnapEnabled()},
         {"canUndo",canvas->canUndo()},{"canRedo",canvas->canRedo()},{"zoom",canvas->viewport().zoom()},{"screenshot",stem + ".png"}};
+    state.insert("activeGlyphId", double(canvas->activeGlyphId().value));
     state.insert("controlsHint", window->statusBar()->currentMessage());
     for(auto *menu : window->findChildren<QMenu *>()) {
         if(menu->isVisible()) {
@@ -150,6 +153,15 @@ void pathMatches(int index, const QPainterPath &expected, const char *message, f
         require(a.type == e.type && std::abs(a.x-e.x)<1e-7 && std::abs(a.y-e.y)<1e-7, message);
     }
 }
+void legacyView() {
+    const auto oldSize=window->size();
+    window->resize(window->width()+1160-canvas->width(),window->height()+1080-canvas->height());
+    QApplication::processEvents();
+    toolbar("Reset view (0)");
+    window->resize(oldSize); QApplication::processEvents();
+    drag({400,300},{400,50},Qt::MiddleButton);
+    require(canvas->viewport().zoom()==1,"legacy recipe 100 percent setup failed");
+}
 void pen() {
     toolbar("Pen (P)");
     penClick({100,100}); penClick({220,100});
@@ -189,7 +201,7 @@ void pen() {
     key(Qt::Key_Return,"Enter after pan and zoom");
     require(canvas->document().shapes().size()==4,"navigation lost pen draft");
     pathMatches(3,navigated,"navigation changed pen draft document points");
-    key(Qt::Key_0,"0");
+    key(Qt::Key_0,"0"); legacyView();
     snap("snapToGrid");
     const auto gridStart=canvas->viewport().toScreen({-300,-150}).toPoint();
     const auto gridEnd=canvas->viewport().toScreen({-200,-150}).toPoint();
@@ -331,7 +343,7 @@ void history() {
     toolbar("Undo"); require(bounds(0)==QRectF(130,120,120,100),"undo resize mismatch");
     toolbar("Undo"); require(bounds(0)==QRectF(100,100,120,100),"undo move mismatch");
     drag({150,150},{150,150}); historyState(true,true);
-    toolbar("Reset view (0)"); historyState(true,true);
+    toolbar("Reset view (0)"); historyState(true,true); legacyView();
     toolbar("Redo"); require(bounds(0)==QRectF(130,120,120,100),"redo move mismatch");
     toolbar("Redo"); require(bounds(0)==QRectF(130,120,150,120),"redo resize mismatch");
     toolbar("Redo"); require(canvas->document().shapes().empty(),"redo delete mismatch");
@@ -446,7 +458,129 @@ void run() {
         require(canvas && canvas->document().shapes().empty(),"doctor: unexpected canvas");
         require(window->findChild<QToolBar *>() && window->findChild<QToolBar *>()->windowTitle()=="Shape tools" && window->findChild<QToolBar *>()->findChild<QAction *>("snapToGrid") && window->findChild<QToolBar *>()->findChild<QAction *>("snapToGeometry") && window->findChildren<QMenuBar *>().isEmpty(),"doctor: production controls missing");
         record("Doctor passed: fresh production window, toolbar, Snap controls, empty document");
-        if(feature=="drawing") {
+        if(feature != "glyph" && feature != "glyphs") {
+            window->resize(window->width()+1100-canvas->width(),window->height());
+            QApplication::processEvents();
+            legacyView();
+        }
+        if(feature=="glyphs") {
+            auto *picker = window->findChild<QListWidget *>("glyphPicker");
+            require(picker && picker->count()==10, "glyph picker missing explicit digits");
+            require(picker->currentItem()->text()=="0" && canvas->activeGlyphId().value==1, "initial digit selection wrong");
+            for(int row=0;row<10;++row) require(picker->item(row)->text()==QString::number(row), "digit labels wrong");
+            record("Initial digit 0 selected in right glyph panel");
+            const auto choose = [picker](int row) {
+                picker->scrollToItem(picker->item(row));
+                QApplication::processEvents();
+                QTest::mouseClick(picker->viewport(),Qt::LeftButton,Qt::NoModifier,
+                                  picker->visualItemRect(picker->item(row)).center());
+                require(picker->currentRow()==row, "picker selection did not change");
+                require(canvas->activeGlyphId().value==picker->item(row)->data(Qt::UserRole).toULongLong(), "picker and canvas disagree");
+                require(canvas->hasFocus(), "canvas focus not restored after glyph selection");
+                record("Glyph row click: " + picker->item(row)->text());
+            };
+            const auto screen = [](QPointF point) { return canvas->viewport().toScreen(point).toPoint(); };
+            choose(0);
+            QTest::keyClick(QApplication::focusWidget(),Qt::Key_R);
+            toolState(fontu::Tool::Rectangle);
+            record("Same selected glyph click restores canvas keyboard shortcut focus");
+            toolbar("Rectangle (R)");
+            drag(screen({-200,100}),screen({0,300}));
+            require(canvas->document().shapes().size()==1,"digit 0 drawing missing");
+            const auto zero = canvas->document().shapes()[0].path;
+            const auto zeroSelection = canvas->document().selection();
+            toolbar("Undo");
+            require(canvas->document().shapes().empty() && canvas->canRedo(), "digit 0 redo setup failed");
+            choose(1);
+            require(canvas->document().shapes().empty() && !canvas->canUndo() && !canvas->canRedo(), "history leaked into digit 1");
+            toolbar("Ellipse (E)");
+            drag(screen({100,200}),screen({300,400}));
+            const auto one = canvas->document().shapes()[0].path;
+            choose(0);
+            require(canvas->document().shapes().empty() && canvas->canRedo(), "digit 0 redo not retained");
+            toolbar("Redo");
+            require(canvas->document().shapes()[0].path==zero && canvas->document().selection()==zeroSelection,"digit 0 drawing/selection changed");
+            choose(1);
+            require(canvas->document().shapes()[0].path==one,"digit 1 drawing changed");
+            toolbar("Undo");
+            choose(0);
+            require(canvas->document().shapes()[0].path==zero,"digit 1 undo affected digit 0");
+            toolbar("Pen (P)");
+            penClick(screen({-100,400})); penClick(screen({100,400}));
+            choose(2);
+            require(canvas->document().shapes().empty() && !canvas->canUndo() && !canvas->canRedo(),"draft leaked into digit 2");
+            key(Qt::Key_Return,"Enter on new glyph");
+            choose(0);
+            key(Qt::Key_Return,"Enter after returning cancels outgoing draft");
+            require(canvas->document().shapes().size()==1 && canvas->document().shapes()[0].path==zero,"unfinished Pen returned");
+            toolbar("Select (V)");
+            const auto start=screen({-100,200}), end=screen({0,250});
+            QTest::mousePress(canvas,Qt::LeftButton,Qt::NoModifier,start); move(end,Qt::LeftButton);
+            require(canvas->document().shapes()[0].path!=zero,"move setup failed");
+            choose(3);
+            QTest::mouseRelease(canvas,Qt::LeftButton,Qt::NoModifier,end);
+            require(canvas->document().shapes().empty(),"release leaked into new glyph");
+            choose(0);
+            require(canvas->document().shapes()[0].path==zero,"outgoing unfinished move not rolled back");
+            window->resize(800,500); QApplication::processEvents();
+            require(picker->verticalScrollBar()->maximum()>0,"glyph panel does not scroll at smaller height");
+            choose(9); choose(0);
+            require(canvas->document().shapes()[0].path==zero,"scroll selection lost completed work");
+            toolbar("Reset view (0)");
+            record("Independent digit drawings and histories survive real picker switching");
+        } else if(feature=="glyph") {
+            const auto screen = [](QPointF point) { return canvas->viewport().toScreen(point).toPoint(); };
+            const auto page = canvas->viewport().transform().mapRect(canvas->document().definition().bounds);
+            require(canvas->rect().contains(page.toAlignedRect()), "initial glyph workspace not fitted");
+            record("Fitted 1000 by 1000 font-unit document with labeled typography guides");
+            toolbar("Rectangle (R)");
+            drag(screen({510,200}),screen({300,300}));
+            require(canvas->document().shapes().empty(),"outside rectangle start accepted");
+            drag(screen({350,100}),screen({650,-400}));
+            require(std::abs(canvas->document().shapes()[0].path.boundingRect().right()-500)<1e-7 && std::abs(canvas->document().shapes()[0].path.boundingRect().top()+250)<1e-7,"rectangle boundary clamp failed");
+            toolbar("Undo");
+            toolbar("Ellipse (E)");
+            drag(screen({350,100}),screen({650,-400}));
+            require(std::abs(canvas->document().shapes()[0].path.boundingRect().right()-500)<1e-7 && std::abs(canvas->document().shapes()[0].path.boundingRect().top()+250)<1e-7,"ellipse boundary clamp failed");
+            toolbar("Undo");
+            toolbar("Rectangle (R)");
+            snap("snapToGeometry");
+            const auto target=screen({123,500});
+            hover(target+QPoint(0,3),target,"Typography x-height guide");
+            drag(target+QPoint(0,3),screen({220,600}));
+            require(std::abs(canvas->document().shapes()[0].path.boundingRect().top()-500)<1e-7,"guide-snapped draw start failed");
+            record("Geometry toggle snaps Rectangle to x-height 500 font units");
+            snap("snapToGeometry");
+            toolbar("Select (V)");
+            drag(screen({170,550}),screen({800,-500}));
+            const auto moved=canvas->document().shapes()[0].path.boundingRect();
+            require(std::abs(moved.right()-500)<1e-7 && std::abs(moved.top()+250)<1e-7,"bounded move failed");
+            drag(screen(moved.topLeft()),screen({-700,-600}));
+            const auto resized=canvas->document().shapes()[0].path.boundingRect();
+            require(std::abs(resized.left()+500)<1e-7 && std::abs(resized.top()+250)<1e-7,"bounded resize failed");
+            toolbar("Undo"); toolbar("Undo"); toolbar("Undo");
+            toolbar("Pen (P)");
+            penClick(screen({510,0}));
+            require(!canvas->canUndo(),"outside Pen anchor accepted");
+            penClick(screen({480,0}));
+            drag(screen({490,100}),screen({800,500}));
+            key(Qt::Key_Return,"Enter bounded cubic Pen path");
+            require(canvas->document().shapes().size()==1,"bounded Pen commit failed");
+            const auto original=canvas->document().shapes()[0].path;
+            require(original.elementAt(1).isCurveTo() && canvas->document().definition().bounds.contains(original.controlPointRect()),"Pen tangent escaped workspace");
+            drag(screen({550,0}),screen({600,100}),Qt::MiddleButton);
+            QWheelEvent wheel(QPointF(400,300),canvas->mapToGlobal(QPoint(400,300)),{}, {0,120},Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+            QApplication::sendEvent(canvas,&wheel);
+            require(canvas->document().shapes()[0].path==original,"pan or zoom changed bounded document");
+            snap("snapToGeometry");
+            const auto baseline=screen({113,0});
+            hover(baseline+QPoint(0,3),baseline,"Baseline after pan and zoom");
+            record("Bounded Pen remains cubic; navigation preserves font coordinates; transformed baseline snaps");
+            toolbar("Reset view (0)");
+            require(canvas->rect().contains(canvas->viewport().transform().mapRect(canvas->document().definition().bounds).toAlignedRect()),"reset failed to fit document");
+            require(canvas->document().shapes()[0].path==original,"reset changed glyph geometry");
+            record("Reset view fits complete glyph document and typography guides");
+        } else if(feature=="drawing") {
             toolbar("Rectangle (R)"); drag({100,100},{220,190});
             require(canvas->document().shapes().size()==1 && bounds(0)==QRectF(100,100,120,90),"rectangle mismatch");
             key(Qt::Key_E,"E"); drag({300,100},{430,200});
@@ -475,8 +609,8 @@ void run() {
             QApplication::sendEvent(canvas,&wheel);require(std::abs(canvas->viewport().zoom()-1.2)<1e-9,"zoom failed");record("Wheel +120 at (200,150)");
             auto before=bounds(0);drag({500,350},{530,370},Qt::MiddleButton);require(bounds(0).topLeft()==before.topLeft()+QPointF(30,20),"pan failed");
             QTest::keyPress(canvas,Qt::Key_Space);before=bounds(0);drag({500,350},{520,360});QTest::keyRelease(canvas,Qt::Key_Space);require(bounds(0).topLeft()==before.topLeft()+QPointF(20,10),"space pan failed");
-            toolbar("Reset view (0)");require(canvas->viewport().zoom()==1,"toolbar reset failed");
-            QApplication::sendEvent(canvas,&wheel);key(Qt::Key_0,"0");require(canvas->viewport().zoom()==1 && canvas->document().shapes()[0].path==original,"key reset changed document");
+            toolbar("Reset view (0)");const auto fitZoom=canvas->viewport().zoom();require(fitZoom<1 && canvas->rect().contains(canvas->viewport().transform().mapRect(canvas->document().definition().bounds).toAlignedRect()),"toolbar fit reset failed");
+            QApplication::sendEvent(canvas,&wheel);key(Qt::Key_0,"0");require(canvas->viewport().zoom()==fitZoom && canvas->document().shapes()[0].path==original,"key reset changed document");
         } else if(feature=="pen") {
             pen();
         } else if(feature=="snapping") {
