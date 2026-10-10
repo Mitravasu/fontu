@@ -1,0 +1,28 @@
+cmake_minimum_required(VERSION 3.21)
+project(fontu VERSION 0.1.0 LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets)
+add_library(fontu_core src/document.cpp src/viewport.cpp src/snapping.cpp)
+target_include_directories(fontu_core PUBLIC src)
+target_link_libraries(fontu_core PUBLIC Qt6::Gui)
+add_library(fontu_canvas src/canvas.cpp src/snap_menu.cpp)
+target_link_libraries(fontu_canvas PUBLIC fontu_core Qt6::Widgets)
+add_executable(fontu MACOSX_BUNDLE src/main.cpp)
+target_link_libraries(fontu PRIVATE fontu_canvas)
+set_target_properties(fontu PROPERTIES
+    MACOSX_BUNDLE_GUI_IDENTIFIER "org.fontu.canvas"
+    MACOSX_BUNDLE_BUNDLE_NAME "fontu"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}")
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+    add_executable(core_tests tests/core_tests.cpp)
+    target_link_libraries(core_tests PRIVATE fontu_core Qt6::Test)
+    add_test(NAME core COMMAND core_tests)
+    add_executable(canvas_tests tests/canvas_tests.cpp)
+    target_link_libraries(canvas_tests PRIVATE fontu_canvas Qt6::Test)
+    add_test(NAME canvas COMMAND canvas_tests -platform offscreen)
+endif()
