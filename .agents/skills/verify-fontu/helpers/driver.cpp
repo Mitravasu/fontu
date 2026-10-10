@@ -88,6 +88,26 @@ void move(QPoint point, Qt::MouseButtons buttons) {
     QMouseEvent event(QEvent::MouseMove,point,canvas->mapToGlobal(point),Qt::NoButton,buttons,Qt::NoModifier);
     QApplication::sendEvent(canvas,&event);
 }
+void hover(QPoint point, QPoint target, const QString &label) {
+    const auto count = canvas->document().shapes().size();
+    const auto selection = canvas->document().selection();
+    QPainterPath selectedPath;
+    if (selection) selectedPath = canvas->document().find(*selection)->path;
+    move(point, Qt::NoButton);
+    const auto image = canvas->grab().toImage();
+    int amber = 0;
+    for (int y = target.y() - 7; y <= target.y() + 7; ++y)
+        for (int x = target.x() - 7; x <= target.x() + 7; ++x) {
+            const auto color = image.pixelColor(x, y);
+            if (color.red() > 170 && color.green() > 70 && color.green() < 165 && color.blue() < 90) ++amber;
+        }
+    require(amber >= 12, "hover snap circle missing at expected target");
+    require(canvas->document().shapes().size() == count && canvas->document().selection() == selection,
+            "hover changed document or selection");
+    if (selection) require(canvas->document().find(*selection)->path == selectedPath, "hover changed selected path");
+    record(label + QString(" hover (%1,%2), amber target (%3,%4), no document change")
+           .arg(point.x()).arg(point.y()).arg(target.x()).arg(target.y()));
+}
 void drag(QPoint from, QPoint to, Qt::MouseButton button=Qt::LeftButton) {
     QTest::mousePress(canvas,button,Qt::NoModifier,from);
     move(to,button);
@@ -153,6 +173,20 @@ void run() {
             snap("snapToGeometry");require(canvas->gridSnapEnabled() && canvas->geometrySnapEnabled(),"both modes mismatch");
             snap("snapToGrid");require(!canvas->gridSnapEnabled() && canvas->geometrySnapEnabled(),"geometry mode mismatch");
             snap("snapToGeometry");require(!canvas->gridSnapEnabled() && !canvas->geometrySnapEnabled(),"off mode mismatch");
+            toolbar("Rectangle (R)");
+            drag({112,100},{180,200});
+            snap("snapToGeometry");
+            hover({115,125},{112,125},"Geometry drawing before press");
+            snap("snapToGrid");
+            hover({115,125},{112,125},"Both options choose nearer geometry before press");
+            snap("snapToGrid");
+            drag({115,125},{225,225});
+            require(bounds(1)==QRectF(112,125,113,100),"hover target disagrees with drawn start");
+            record("Snapped drawing bounds match pre-press geometry marker");
+            snap("snapToGeometry");
+            snap("snapToGrid");
+            const auto gridTarget = canvas->viewport().toScreen({-300,150}).toPoint();
+            hover(gridTarget+QPoint(3,2),gridTarget,"Grid drawing before press");
         } else throw std::runtime_error("unknown feature");
         record("PASS: all assertions for " + feature);
         window->close();QApplication::exit(0);

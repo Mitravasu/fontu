@@ -13,7 +13,7 @@ Each feature entry lists all known user controls, then separates the scripted co
 - [Drawing shapes](drawing.md) covers Rectangle and Ellipse toolbar/keyboard selection, drags, tiny-drag rejection, and Escape cancellation.
 - [Selecting and editing](editing.md) covers Select toolbar/keyboard, move, one corner resize, deselection, Delete, and Backspace. It lists remaining handle and rollback checks.
 - [Navigating the canvas](navigation.md) covers wheel events, both pan controls, and both Reset view controls. Native trackpad delivery remains unverified.
-- [Snapping](snapping.md) covers the two Snap menu checkboxes and all four toggle combinations. Geometry effects require additional recipes.
+- [Snapping](snapping.md) covers the two Snap menu checkboxes, all four toggle combinations, pre-press drawing hover targets, and a geometry-snapped drawing start. Move and resize effects require additional recipes.
 
 ## Proof reporting
 

@@ -11,6 +11,10 @@ namespace fontu {
 namespace {
 constexpr double handleSize = 8;
 constexpr double hitTolerance = 5;
+SnapAxes resizeAxes(int handle) {
+    return handle == 1 || handle == 5 ? SnapAxes::Vertical
+         : handle == 3 || handle == 7 ? SnapAxes::Horizontal : SnapAxes::Both;
+}
 QPen cosmeticPen(const QColor &color, double width = 1) {
     QPen pen(color, width);
     pen.setCosmetic(true);
@@ -34,12 +38,14 @@ void Canvas::setGridSnapEnabled(bool enabled) {
     if (snapOptions_.grid == enabled) return;
     cancelGesture();
     snapOptions_.grid = enabled;
+    updateHoverSnap();
     emit snapOptionsChanged();
 }
 void Canvas::setGeometrySnapEnabled(bool enabled) {
     if (snapOptions_.geometry == enabled) return;
     cancelGesture();
     snapOptions_.geometry = enabled;
+    updateHoverSnap();
     emit snapOptionsChanged();
 }
 void Canvas::resetView() {
@@ -138,6 +144,8 @@ void Canvas::mousePressEvent(QMouseEvent *event) {
     if (gesture_ != Gesture::Idle) return;
     setFocus(Qt::MouseFocusReason);
     const auto position = event->position();
+    hoverPosition_ = position;
+    snapMarker_.reset();
     startScreen_ = lastScreen_ = position;
     startDocument_ = viewport_.toDocument(position);
     gestureButton_ = event->button();
@@ -182,29 +190,18 @@ void Canvas::updateGesture(const QPointF &position) {
     } else if (gesture_ == Gesture::Move && editingId_) {
         auto delta = documentPoint - startDocument_;
         const auto rawBounds = viewport_.transform().mapRect(translated(originalPath_, delta).boundingRect());
-        std::optional<SnapResult> best;
-        QPointF correction;
         if (position != startScreen_) {
-            for (const auto &boundsPoint : boundsSnapPoints(rawBounds)) {
-                if (auto snap = snapPoint(boundsPoint, document_, viewport_, snapOptions_, editingId_)) {
-                    if (!best || snap->distance < best->distance) {
-                        best = snap;
-                        correction = snap->point - boundsPoint;
-                    }
-                }
+            if (auto snap = moveSnap(rawBounds, *editingId_)) {
+                const auto correction = snap->second;
+                delta += QPointF(correction.x() / viewport_.zoom(), -correction.y() / viewport_.zoom());
+                snapMarker_ = snap->first.point;
             }
-        }
-        if (best) {
-            delta += QPointF(correction.x() / viewport_.zoom(), -correction.y() / viewport_.zoom());
-            snapMarker_ = best->point;
         }
         document_.replacePath(*editingId_, translated(originalPath_, delta));
     } else if (gesture_ == Gesture::Resize && editingId_) {
         auto bounds = viewport_.transform().mapRect(originalPath_.boundingRect());
         auto handlePosition = handles(bounds)[resizeHandle_] + position - startScreen_;
-        const auto axes = resizeHandle_ == 1 || resizeHandle_ == 5 ? SnapAxes::Vertical
-                        : resizeHandle_ == 3 || resizeHandle_ == 7 ? SnapAxes::Horizontal
-                        : SnapAxes::Both;
+        const auto axes = resizeAxes(resizeHandle_);
         if (axes == SnapAxes::Vertical) handlePosition.setX(bounds.center().x());
         if (axes == SnapAxes::Horizontal) handlePosition.setY(bounds.center().y());
         if (position != startScreen_) {
@@ -224,6 +221,36 @@ void Canvas::updateGesture(const QPointF &position) {
     lastScreen_ = position;
     update();
 }
+std::optional<std::pair<SnapResult, QPointF>> Canvas::moveSnap(const QRectF &bounds, ShapeId excluded) const {
+    std::optional<std::pair<SnapResult, QPointF>> best;
+    for (const auto &point : boundsSnapPoints(bounds)) {
+        if (auto snap = snapPoint(point, document_, viewport_, snapOptions_, excluded)) {
+            if (!best || snap->distance < best->first.distance)
+                best = std::make_pair(*snap, snap->point - point);
+        }
+    }
+    return best;
+}
+void Canvas::updateHoverSnap() {
+    snapMarker_.reset();
+    if (hoverPosition_ && rect().contains(hoverPosition_->toPoint()) && gesture_ == Gesture::Idle && !spaceHeld_) {
+        const auto position = *hoverPosition_;
+        if (tool_ != Tool::Select) {
+            if (auto snap = snapPoint(position, document_, viewport_, snapOptions_))
+                snapMarker_ = snap->point;
+        } else if (auto id = document_.selection()) {
+            const auto bounds = selectionScreenBounds();
+            const int handle = handleAt(position);
+            if (handle >= 0) {
+                if (auto snap = snapPoint(handles(bounds)[handle], document_, viewport_, snapOptions_, id, resizeAxes(handle)))
+                    snapMarker_ = snap->point;
+            } else if (document_.hitTest(viewport_.toDocument(position), hitTolerance / viewport_.zoom()) == id) {
+                if (auto snap = moveSnap(bounds, *id)) snapMarker_ = snap->first.point;
+            }
+        }
+    }
+    update();
+}
 void Canvas::updateCursor(const QPointF &position) {
     if (spaceHeld_) { setCursor(Qt::OpenHandCursor); return; }
     if (tool_ != Tool::Select) { setCursor(Qt::CrossCursor); return; }
@@ -234,8 +261,12 @@ void Canvas::updateCursor(const QPointF &position) {
     setCursor(handle < 0 ? Qt::ArrowCursor : cursors[handle]);
 }
 void Canvas::mouseMoveEvent(QMouseEvent *event) {
+    hoverPosition_ = event->position();
     if (gesture_ != Gesture::Idle) updateGesture(event->position());
-    else updateCursor(event->position());
+    else {
+        updateCursor(event->position());
+        updateHoverSnap();
+    }
 }
 void Canvas::mouseReleaseEvent(QMouseEvent *event) {
     if (gesture_ == Gesture::Idle || event->button() != gestureButton_) return;
@@ -248,7 +279,8 @@ void Canvas::mouseReleaseEvent(QMouseEvent *event) {
     gesture_ = Gesture::Idle;
     editingId_.reset();
     originalPath_ = preview_ = {};
-    snapMarker_.reset();
+    hoverPosition_ = event->position();
+    updateHoverSnap();
     updateCursor(event->position());
     update();
 }
@@ -266,17 +298,20 @@ void Canvas::wheelEvent(QWheelEvent *event) {
         double steps = event->angleDelta().y() / 120.0;
         if (steps == 0) steps = event->pixelDelta().y() / 100.0;
         viewport_.zoomAt(event->position(), std::pow(1.2, steps));
+        hoverPosition_ = event->position();
         updateCursor(event->position());
-        update();
+        updateHoverSnap();
     }
     event->accept();
 }
 void Canvas::keyPressEvent(QKeyEvent *event) {
     if (event->key() == Qt::Key_Space) {
         spaceHeld_ = true;
+        snapMarker_.reset();
+        update();
         if (gesture_ == Gesture::Idle) setCursor(Qt::OpenHandCursor);
     } else if (event->key() == Qt::Key_Escape) {
-        if (gesture_ == Gesture::Idle) document_.select({});
+        if (gesture_ == Gesture::Idle) { document_.select({}); snapMarker_.reset(); }
         else cancelGesture();
         update();
     } else if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
@@ -294,11 +329,19 @@ void Canvas::keyPressEvent(QKeyEvent *event) {
 void Canvas::keyReleaseEvent(QKeyEvent *event) {
     if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
         spaceHeld_ = false;
+        updateHoverSnap();
         if (gesture_ == Gesture::Idle) setCursor(tool_ == Tool::Select ? Qt::ArrowCursor : Qt::CrossCursor);
     } else QWidget::keyReleaseEvent(event);
 }
+void Canvas::leaveEvent(QEvent *event) {
+    hoverPosition_.reset();
+    snapMarker_.reset();
+    update();
+    QWidget::leaveEvent(event);
+}
 void Canvas::focusOutEvent(QFocusEvent *event) {
     spaceHeld_ = false;
+    hoverPosition_.reset();
     cancelGesture();
     QWidget::focusOutEvent(event);
 }

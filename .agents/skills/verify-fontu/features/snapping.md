@@ -1,9 +1,10 @@
 # Snapping
 
-Users enable snapping to the visible grid, shape geometry, or both from the Snap menu. During edits an amber circle marks the winning target.
+Users enable snapping to the visible grid, shape geometry, or both from the Snap menu. An amber circle marks the winning target before a drawing press and during edits. Hovering a selected handle or shape body previews its eligible resize or move target without changing geometry.
 
 ## Sub-features
 
+- `snap-hover` previews drawing starts and selected-shape edit targets without changing the document.
 - `snap-menu` toggles each independent option and reaches all four combinations.
 - `snap-draw` snaps a draw's start and end points.
 - `snap-move` snaps shape corners, edge midpoints, or center.
@@ -28,9 +29,12 @@ Run `.agents/skills/verify-fontu/helpers/control-fontu snapping --evidence /tmp/
 - Open it and click `To shape geometry`, selected by `snapToGeometry`. Both options are enabled.
 - Open it and click `To grid` again. Only geometry is enabled.
 - Open it and click `To shape geometry` again. Both options are off.
-- Every opening and toggle produces a screenshot and state record. Require the final `PASS:` record, exit zero, and completed cleanup in `run.json`.
+- Select Rectangle from the production toolbar and draw a target rectangle. With geometry enabled, hover near its outline and assert the amber circle before pressing. Enable grid too and assert the same nearer geometry target.
+- Disable grid, draw from that hover point, and assert the new bounds start at the previewed geometry target.
+- Switch to grid only and hover near a visible intersection. Assert its amber circle before pressing. Each hover checks that document count, selection, and the selected path are unchanged.
+- Every opening, toggle, and hover produces a screenshot and state record. Require the final `PASS:` record, exit zero, and completed cleanup in `run.json`.
 
-This command proves the toggle UI and connections only. To prove geometry effects, extend the production-window driver with drags near visible grid intersections and another shape's outline, assert the rendered snapped bounds, and capture the amber marker before release. Cover draw, move, each constrained resize axis, all option combinations, target competition, zoom/pan mapping, and toggle-change cancellation before claiming full snapping coverage.
+This command proves the toggle UI, drawing hover markers for grid/geometry/both, and a geometry-snapped drawing start. Move and resize hover/drag effects, each constrained resize axis, zoom/pan mapping, and toggle-change cancellation still need production-window recipes before claiming full snapping coverage.
 
 ## Gotchas
 

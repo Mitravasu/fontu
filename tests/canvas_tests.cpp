@@ -13,6 +13,16 @@ void movePointer(Canvas &canvas, QPoint position, Qt::MouseButton button = Qt::L
                        Qt::NoButton, button, Qt::NoModifier);
     QApplication::sendEvent(&canvas, &event);
 }
+bool markerAt(Canvas &canvas, QPoint center) {
+    const auto image = canvas.grab().toImage();
+    int amber = 0;
+    for (int y = center.y() - 7; y <= center.y() + 7; ++y)
+        for (int x = center.x() - 7; x <= center.x() + 7; ++x) {
+            const auto color = image.pixelColor(x, y);
+            if (color.red() > 170 && color.green() > 70 && color.green() < 165 && color.blue() < 90) ++amber;
+        }
+    return amber >= 12;
+}
 void drag(Canvas &canvas, QPoint start, QPoint end, Qt::MouseButton button = Qt::LeftButton) {
     QTest::mousePress(&canvas, button, Qt::NoModifier, start);
     movePointer(canvas, end, button);
@@ -36,6 +46,106 @@ void prepare(Canvas &canvas) {
 class CanvasTests : public QObject {
     Q_OBJECT
 private slots:
+    void drawingHoverAndCleanup() {
+        Canvas canvas;
+        prepare(canvas);
+        canvas.setTool(Tool::Rectangle);
+        movePointer(canvas, {103, 102}, Qt::NoButton);
+        QVERIFY(!markerAt(canvas, {100, 100}));
+        canvas.setGridSnapEnabled(true);
+        QVERIFY(markerAt(canvas, {100, 100}));
+        QVERIFY(canvas.document().shapes().empty());
+        QVERIFY(!canvas.document().selection());
+        movePointer(canvas, {113, 113}, Qt::NoButton);
+        QVERIFY(!markerAt(canvas, {100, 100}));
+        movePointer(canvas, {103, 102}, Qt::NoButton);
+        QVERIFY(markerAt(canvas, {100, 100}));
+        canvas.setGridSnapEnabled(false);
+        QVERIFY(!markerAt(canvas, {100, 100}));
+        canvas.setGridSnapEnabled(true);
+        QVERIFY(markerAt(canvas, {100, 100}));
+        QEvent leave(QEvent::Leave);
+        QApplication::sendEvent(&canvas, &leave);
+        QVERIFY(!markerAt(canvas, {100, 100}));
+        canvas.setGeometrySnapEnabled(true);
+        QVERIFY(!markerAt(canvas, {100, 100}));
+        movePointer(canvas, {103, 102}, Qt::NoButton);
+        QVERIFY(markerAt(canvas, {100, 100}));
+        canvas.setTool(Tool::Ellipse);
+        QVERIFY(!markerAt(canvas, {100, 100}));
+        movePointer(canvas, {103, 102}, Qt::NoButton);
+        QTest::keyPress(&canvas, Qt::Key_Space);
+        QVERIFY(!markerAt(canvas, {100, 100}));
+        QTest::keyRelease(&canvas, Qt::Key_Space);
+        QVERIFY(markerAt(canvas, {100, 100}));
+        QTest::mousePress(&canvas, Qt::MiddleButton, Qt::NoModifier, {103, 102});
+        QVERIFY(!markerAt(canvas, {100, 100}));
+        QTest::mouseRelease(&canvas, Qt::MiddleButton, Qt::NoModifier, {103, 102});
+        QVERIFY(markerAt(canvas, {100, 100}));
+        QFocusEvent lost(QEvent::FocusOut);
+        QApplication::sendEvent(&canvas, &lost);
+        QVERIFY(!markerAt(canvas, {100, 100}));
+        movePointer(canvas, {103, 102}, Qt::NoButton);
+        drag(canvas, {103, 102}, {198, 199});
+        QCOMPARE(canvas.viewport().transform().mapRect(canvas.document().shapes()[0].path.boundingRect()),
+                 QRectF(100, 100, 100, 100));
+        QVERIFY(markerAt(canvas, {200, 200}));
+    }
+    void geometryHoverCompetitionAndZoom() {
+        Canvas canvas;
+        prepare(canvas);
+        canvas.setTool(Tool::Rectangle);
+        drag(canvas, {112, 100}, {180, 200});
+        const auto original = canvas.document().shapes()[0].path;
+        const auto selected = canvas.document().selection();
+        canvas.setGeometrySnapEnabled(true);
+        movePointer(canvas, {115, 125}, Qt::NoButton);
+        QVERIFY(markerAt(canvas, {112, 125}));
+        canvas.setGridSnapEnabled(true);
+        QVERIFY(markerAt(canvas, {112, 125}));
+        QCOMPARE(canvas.document().shapes()[0].path, original);
+        QCOMPARE(canvas.document().selection(), selected);
+        drag(canvas, {115, 125}, {225, 225});
+        QCOMPARE(canvas.viewport().transform().mapRect(canvas.document().shapes()[1].path.boundingRect()),
+                 QRectF(112, 125, 113, 100));
+        movePointer(canvas, {98, 248}, Qt::NoButton);
+        QVERIFY(markerAt(canvas, {100, 250}));
+        canvas.setGridSnapEnabled(false);
+        zoom(canvas, {400, 300}, 120);
+        const auto target = canvas.viewport().toScreen(canvas.document().shapes()[0].path.boundingRect().topLeft());
+        movePointer(canvas, (target + QPointF(-7, 0)).toPoint(), Qt::NoButton);
+        QVERIFY(markerAt(canvas, target.toPoint()));
+        movePointer(canvas, (target + QPointF(-10, 0)).toPoint(), Qt::NoButton);
+        QVERIFY(!markerAt(canvas, target.toPoint()));
+    }
+    void selectedHoverTargets() {
+        Canvas canvas;
+        prepare(canvas);
+        canvas.setTool(Tool::Rectangle);
+        drag(canvas, {102, 103}, {198, 197});
+        const auto original = canvas.document().shapes()[0].path;
+        canvas.setTool(Tool::Select);
+        canvas.setGeometrySnapEnabled(true);
+        movePointer(canvas, {150, 150}, Qt::NoButton);
+        QVERIFY(!markerAt(canvas, {150, 150}));
+        canvas.setGridSnapEnabled(true);
+        movePointer(canvas, {202, 199}, Qt::NoButton);
+        QVERIFY(markerAt(canvas, {200, 200}));
+        QCOMPARE(canvas.document().shapes()[0].path, original);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {202, 199});
+        QCOMPARE(canvas.document().shapes()[0].path, original);
+        movePointer(canvas, {202, 150}, Qt::NoButton);
+        QVERIFY(markerAt(canvas, {200, 150}));
+        movePointer(canvas, {150, 140}, Qt::NoButton);
+        QVERIFY(markerAt(canvas, {150, 150}));
+        QCOMPARE(canvas.document().shapes()[0].path, original);
+        movePointer(canvas, {500, 400}, Qt::NoButton);
+        QVERIFY(!markerAt(canvas, {500, 400}));
+        QVERIFY(!markerAt(canvas, {150, 150}));
+        drag(canvas, {202, 199}, {226, 227});
+        QCOMPARE(canvas.viewport().transform().mapRect(canvas.document().shapes()[0].path.boundingRect()),
+                 QRectF(102, 103, 123, 122));
+    }
     void snapMenuToggles() {
         Canvas canvas;
         prepare(canvas);
@@ -193,6 +303,9 @@ private slots:
         const double step = gridStep(canvas.viewport().zoom());
         const auto start = canvas.viewport().toScreen({-step, step});
         const auto end = canvas.viewport().toScreen({step, -step});
+        movePointer(canvas, (start + QPointF(2, 2)).toPoint(), Qt::NoButton);
+        QVERIFY(markerAt(canvas, start.toPoint()));
+        QVERIFY(canvas.document().shapes().empty());
         drag(canvas, (start + QPointF(2, 2)).toPoint(), (end + QPointF(-2, -2)).toPoint());
         QVERIFY(QLineF(canvas.document().shapes()[0].path.boundingRect().topLeft(), QPointF(-step, -step)).length() < 1e-7);
         QVERIFY(std::abs(canvas.document().shapes()[0].path.boundingRect().width() - 2 * step) < 1e-7);

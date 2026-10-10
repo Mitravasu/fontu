@@ -4,6 +4,7 @@
 #include "snapping.h"
 #include <QWidget>
 #include <array>
+#include <utility>
 
 namespace fontu {
 enum class Tool { Select, Rectangle, Ellipse };
@@ -33,16 +34,20 @@ protected:
     void keyPressEvent(QKeyEvent *) override;
     void keyReleaseEvent(QKeyEvent *) override;
     void focusOutEvent(QFocusEvent *) override;
+    void leaveEvent(QEvent *) override;
 private:
     enum class Gesture { Idle, Draw, Move, Resize, Pan };
     void cancelGesture();
     void updateGesture(const QPointF &screenPosition);
     void updateCursor(const QPointF &screenPosition);
+    void updateHoverSnap();
+    std::optional<std::pair<SnapResult, QPointF>> moveSnap(const QRectF &screenBounds, ShapeId excluded) const;
     QRectF selectionScreenBounds() const;
     std::array<QPointF, 8> handles(const QRectF &screenBounds) const;
     int handleAt(const QPointF &screenPosition) const;
     SnapOptions snapOptions_;
     std::optional<QPointF> snapMarker_;
+    std::optional<QPointF> hoverPosition_;
     Document document_;
     Viewport viewport_;
     Tool tool_ = Tool::Select;
