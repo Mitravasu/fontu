@@ -32,8 +32,13 @@ void record(const QString &action) {
     QJsonArray shapes;
     for (const auto &shape : canvas->document().shapes()) {
         auto r = canvas->viewport().transform().mapRect(shape.path.boundingRect());
+        QJsonArray elements;
+        for (int i = 0; i < shape.path.elementCount(); ++i) {
+            const auto element = shape.path.elementAt(i);
+            elements.append(QJsonObject{{"type",int(element.type)},{"documentPoint",QJsonArray{element.x,element.y}}});
+        }
         shapes.append(QJsonObject{{"id",double(shape.id)},{"screenBounds", QJsonArray{r.x(),r.y(),r.width(),r.height()}},
-                                {"curve",shape.path.elementAt(1).isCurveTo()}});
+                                {"curve",shape.path.elementAt(1).isCurveTo()},{"paint",shape.paint==fontu::ShapePaint::Stroke ? "stroke" : "filled"},{"elements",elements}});
     }
     QJsonObject state{{"action",action},{"feature",feature},{"backend",QApplication::platformName()},
         {"inputBoundary","Qt events to unchanged production window, not OS input"},
@@ -57,9 +62,9 @@ void record(const QString &action) {
 }
 void toolState(fontu::Tool expected) {
     require(canvas->tool()==expected,"canvas tool did not change");
-    const QString names[]={"Select (V)","Rectangle (R)","Ellipse (E)"};
+    const QString names[]={"Select (V)","Rectangle (R)","Ellipse (E)","Pen (P)"};
     for(auto *action : window->findChild<QToolBar *>()->actions()) {
-        for(int i=0;i<3;++i) if(action->text()==names[i])
+        for(int i=0;i<4;++i) if(action->text()==names[i])
             require(action->isChecked()==(i==int(expected)),"toolbar tool state mismatch");
     }
 }
@@ -75,6 +80,7 @@ void toolbar(const QString &text) {
     if(text=="Select (V)") toolState(fontu::Tool::Select);
     if(text=="Rectangle (R)") toolState(fontu::Tool::Rectangle);
     if(text=="Ellipse (E)") toolState(fontu::Tool::Ellipse);
+    if(text=="Pen (P)") toolState(fontu::Tool::Pen);
     record("Toolbar click: " + text);
 }
 void key(Qt::Key key, const QString &label) {
@@ -82,6 +88,7 @@ void key(Qt::Key key, const QString &label) {
     if(key==Qt::Key_V) toolState(fontu::Tool::Select);
     if(key==Qt::Key_R) toolState(fontu::Tool::Rectangle);
     if(key==Qt::Key_E) toolState(fontu::Tool::Ellipse);
+    if(key==Qt::Key_P) toolState(fontu::Tool::Pen);
     record("Canvas key: " + label);
 }
 void move(QPoint point, Qt::MouseButtons buttons) {
@@ -130,6 +137,156 @@ void snap(const QString &name) {
     require(action->isChecked()!=previous,"snap toggle failed");
     record("Snap menu click: " + action->text());
 }
+void penClick(QPoint point) {
+    QTest::mouseClick(canvas, Qt::LeftButton, Qt::NoModifier, point);
+    record(QString("Pen anchor click (%1,%2)").arg(point.x()).arg(point.y()));
+}
+void pathMatches(int index, const QPainterPath &expected, const char *message, fontu::ShapePaint paint = fontu::ShapePaint::Stroke) {
+    require(canvas->document().shapes().at(index).paint==paint,"pen path paint mismatch");
+    const auto &actual = canvas->document().shapes().at(index).path;
+    require(actual.elementCount() == expected.elementCount(), message);
+    for (int i = 0; i < expected.elementCount(); ++i) {
+        const auto a = actual.elementAt(i), e = expected.elementAt(i);
+        require(a.type == e.type && std::abs(a.x-e.x)<1e-7 && std::abs(a.y-e.y)<1e-7, message);
+    }
+}
+void pen() {
+    toolbar("Pen (P)");
+    penClick({100,100}); penClick({220,100});
+    require(canvas->document().shapes().empty(), "pen inserted before Enter");
+    QPainterPath line(canvas->viewport().toDocument({100,100}));
+    line.lineTo(canvas->viewport().toDocument({220,100}));
+    key(Qt::Key_Return,"Enter");
+    require(canvas->document().shapes().size()==1, "horizontal pen line not committed");
+    pathMatches(0,line,"horizontal pen line mismatch");
+    key(Qt::Key_V,"V"); key(Qt::Key_P,"P");
+    penClick({300,100}); penClick({350,160}); penClick({400,100});
+    QPainterPath corners(canvas->viewport().toDocument({300,100}));
+    corners.lineTo(canvas->viewport().toDocument({350,160}));
+    corners.lineTo(canvas->viewport().toDocument({400,100}));
+    key(Qt::Key_Return,"Enter");
+    require(canvas->document().shapes().size()==2,"corner pen path not committed");
+    pathMatches(1,corners,"corner pen path mismatch");
+    penClick({400,250}); drag({500,250},{500,290});
+    require(canvas->document().shapes().size()==2,"dragged pen anchor committed early");
+    penClick({600,250}); penClick({700,300});
+    QPainterPath mixed(canvas->viewport().toDocument({400,250}));
+    mixed.cubicTo(canvas->viewport().toDocument({400,250}),canvas->viewport().toDocument({500,210}),canvas->viewport().toDocument({500,250}));
+    mixed.cubicTo(canvas->viewport().toDocument({500,290}),canvas->viewport().toDocument({600,250}),canvas->viewport().toDocument({600,250}));
+    mixed.lineTo(canvas->viewport().toDocument({700,300}));
+    key(Qt::Key_Return,"Enter");
+    require(canvas->document().shapes().size()==3,"mixed pen path not committed");
+    pathMatches(2,mixed,"mixed pen cubic controls mismatch");
+    record("Mixed pen exact cubic controls and line segment verified");
+    penClick({750,100}); penClick({850,150}); key(Qt::Key_Escape,"Escape"); key(Qt::Key_Return,"Enter after Escape");
+    require(canvas->document().shapes().size()==3,"cancelled pen path committed");
+    penClick({100,350}); penClick({220,350});
+    QPainterPath navigated(canvas->viewport().toDocument({100,350}));
+    navigated.lineTo(canvas->viewport().toDocument({220,350}));
+    drag({800,450},{830,470},Qt::MiddleButton);
+    QWheelEvent wheel(QPointF(200,350),canvas->mapToGlobal(QPoint(200,350)),QPoint(),QPoint(0,120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+    QApplication::sendEvent(canvas,&wheel); record("Pen draft after middle pan and wheel zoom");
+    key(Qt::Key_Return,"Enter after pan and zoom");
+    require(canvas->document().shapes().size()==4,"navigation lost pen draft");
+    pathMatches(3,navigated,"navigation changed pen draft document points");
+    key(Qt::Key_0,"0");
+    snap("snapToGrid");
+    const auto gridStart=canvas->viewport().toScreen({-300,-150}).toPoint();
+    const auto gridEnd=canvas->viewport().toScreen({-200,-150}).toPoint();
+    const auto gridHandle=canvas->viewport().toScreen({-200,-100}).toPoint();
+    penClick(gridStart+QPoint(3,2)); drag(gridEnd+QPoint(3,2),gridHandle+QPoint(3,2));
+    QPainterPath gridPath(QPointF(-300,-150));
+    gridPath.cubicTo({-300,-150},{-200,-200},{-200,-150});
+    key(Qt::Key_Return,"Enter grid-snapped pen");
+    require(canvas->document().shapes().size()==5,"grid pen not committed");
+    pathMatches(4,gridPath,"grid pen anchor or tangent snap mismatch");
+    snap("snapToGrid"); snap("snapToGeometry");
+    const auto geometryStart=canvas->viewport().toScreen(QPointF(line.elementAt(0).x,line.elementAt(0).y)).toPoint();
+    const auto geometryEnd=canvas->viewport().toScreen(QPointF(line.elementAt(1).x,line.elementAt(1).y)).toPoint();
+    penClick(geometryStart+QPoint(-2,2)); penClick(geometryEnd+QPoint(2,2));
+    key(Qt::Key_Return,"Enter geometry-snapped pen");
+    require(canvas->document().shapes().size()==6,"geometry pen not committed");
+    pathMatches(5,line,"pen geometry snap missed committed path endpoints");
+    penClick({800,350}); penClick({900,400}); snap("snapToGeometry"); key(Qt::Key_Return,"Enter after Snap menu focus loss");
+    require(canvas->document().shapes().size()==6,"Snap menu failed to cancel pen draft");
+    toolbar("Select (V)");
+    const auto cornerStart=corners.elementAt(0), cornerEnd=corners.elementAt(1);
+    const auto selectPoint=canvas->viewport().toScreen({(cornerStart.x+cornerEnd.x)/2,(cornerStart.y+cornerEnd.y)/2}).toPoint();
+    QTest::mouseClick(canvas,Qt::LeftButton,Qt::NoModifier,selectPoint);
+    require(canvas->document().selection()==canvas->document().shapes()[1].id,"pen stroke selection failed");
+    record("Select committed pen stroke");
+    drag(selectPoint,selectPoint+QPoint(30,20));
+    const auto delta=canvas->viewport().toDocument(selectPoint+QPoint(30,20))-canvas->viewport().toDocument(selectPoint);
+    pathMatches(1,QTransform::fromTranslate(delta.x(),delta.y()).map(corners),"pen stroke move mismatch");
+    key(Qt::Key_Delete,"Delete selected pen");
+    require(canvas->document().shapes().size()==5 && !canvas->document().selection(),"pen stroke delete failed");
+
+    toolbar("Pen (P)");
+    penClick({100,450}); penClick({220,450}); penClick({100,450});
+    require(canvas->document().shapes().size()==5,"two-anchor draft closed prematurely");
+    key(Qt::Key_Escape,"Escape minimum-anchor closure draft");
+    penClick({100,450}); penClick({240,450}); penClick({180,580});
+    QPainterPath triangle(canvas->viewport().toDocument({100,450}));
+    triangle.lineTo(canvas->viewport().toDocument({240,450}));
+    triangle.lineTo(canvas->viewport().toDocument({180,580}));
+    triangle.closeSubpath();
+    move({105,450},Qt::NoButton); record("Hover first anchor: closing ring and filled triangle preview");
+    require(canvas->document().shapes().size()==5,"closure hover inserted a shape");
+    require(canvas->cursor().shape()==Qt::PointingHandCursor,"closing hover cursor missing");
+    const auto closingImage=canvas->grab().toImage();
+    int blueRingPixels=0;
+    for(int y=441;y<=459;++y) for(int x=91;x<=109;++x) {
+        const auto color=closingImage.pixelColor(x,y);
+        const auto radius=QLineF(QPointF(100,450),QPointF(x,y)).length();
+        if(radius>=6 && radius<=9 && color.red()<100 && color.green()<160 && color.blue()>180) ++blueRingPixels;
+    }
+    require(blueRingPixels>=15,"blue closing ring missing");
+    const auto previewFill=closingImage.pixelColor(177,489);
+    require(previewFill.red()<230 && previewFill.blue()>235,"closed hover preview lacks interior fill");
+    QTest::mousePress(canvas,Qt::LeftButton,Qt::NoModifier,{105,450});
+    require(canvas->document().shapes().size()==6,"first-anchor press did not commit immediately");
+    pathMatches(5,triangle,"closed triangle elements mismatch",fontu::ShapePaint::Filled);
+    require(canvas->document().selection()==canvas->document().shapes()[5].id,"closed triangle was not selected");
+    record("First-anchor press commits filled triangle and selects it");
+    QTest::mouseRelease(canvas,Qt::LeftButton,Qt::NoModifier,{105,450});
+    key(Qt::Key_Return,"Enter after click closure");
+    require(canvas->document().shapes().size()==6,"closure release or Enter committed another path");
+    key(Qt::Key_V,"V"); key(Qt::Key_Escape,"Escape clear filled selection");
+    QTest::mouseClick(canvas,Qt::LeftButton,Qt::NoModifier,{180,490});
+    require(canvas->document().selection()==canvas->document().shapes()[5].id,"closed contour interior selection failed");
+    record("Select closed Pen triangle through its filled interior");
+    key(Qt::Key_P,"P");
+    penClick({450,420}); penClick({600,420}); drag({600,550},{630,550});
+    QPainterPath curved(canvas->viewport().toDocument({450,420}));
+    curved.lineTo(canvas->viewport().toDocument({600,420}));
+    curved.cubicTo(canvas->viewport().toDocument({600,420}),canvas->viewport().toDocument({570,550}),canvas->viewport().toDocument({600,550}));
+    curved.cubicTo(canvas->viewport().toDocument({630,550}),canvas->viewport().toDocument({450,420}),canvas->viewport().toDocument({450,420}));
+    curved.closeSubpath();
+    move({450,420},Qt::NoButton); record("Hover first anchor: filled curved closing preview");
+    penClick({450,420});
+    require(canvas->document().shapes().size()==7,"curved first-anchor closure failed");
+    pathMatches(6,curved,"closing cubic lost final outgoing tangent",fontu::ShapePaint::Filled);
+    require(canvas->document().selection()==canvas->document().shapes()[6].id,"closed curve was not selected");
+    record("Closed Pen exact closing cubic controls verified");
+    penClick({750,450}); penClick({900,450}); penClick({840,580});
+    QPainterPath navigatedClosed(canvas->viewport().toDocument({750,450}));
+    navigatedClosed.lineTo(canvas->viewport().toDocument({900,450}));
+    navigatedClosed.lineTo(canvas->viewport().toDocument({840,580}));
+    navigatedClosed.closeSubpath();
+    drag({800,300},{820,310},Qt::MiddleButton);
+    QWheelEvent closingWheel(QPointF(800,500),canvas->mapToGlobal(QPoint(800,500)),QPoint(),QPoint(0,120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+    QApplication::sendEvent(canvas,&closingWheel);
+    const auto first=navigatedClosed.elementAt(0);
+    const auto closingScreen=canvas->viewport().toScreen({first.x,first.y}).toPoint();
+    move(closingScreen+QPoint(7,0),Qt::NoButton); record("Closing hover at seven screen pixels after pan and zoom");
+    penClick(closingScreen+QPoint(7,0));
+    require(canvas->document().shapes().size()==8,"screen-radius closure after navigation failed");
+    pathMatches(7,navigatedClosed,"navigation changed closed contour document points",fontu::ShapePaint::Filled);
+    record("Pan and zoom preserve click closure and exact contour coordinates");
+    penClick({750,150}); penClick({900,150}); penClick({840,250}); penClick({759,150});
+    require(canvas->document().shapes().size()==8,"nine-screen-pixel click closed outside radius");
+    key(Qt::Key_Escape,"Escape outside-radius closure draft");
+}
 void run() {
     try {
         for(auto *widget : QApplication::topLevelWidgets()) {
@@ -168,6 +325,8 @@ void run() {
             QTest::keyPress(canvas,Qt::Key_Space);before=bounds(0);drag({500,350},{520,360});QTest::keyRelease(canvas,Qt::Key_Space);require(bounds(0).topLeft()==before.topLeft()+QPointF(20,10),"space pan failed");
             toolbar("Reset view (0)");require(canvas->viewport().zoom()==1,"toolbar reset failed");
             QApplication::sendEvent(canvas,&wheel);key(Qt::Key_0,"0");require(canvas->viewport().zoom()==1 && canvas->document().shapes()[0].path==original,"key reset changed document");
+        } else if(feature=="pen") {
+            pen();
         } else if(feature=="snapping") {
             snap("snapToGrid");require(canvas->gridSnapEnabled() && !canvas->geometrySnapEnabled(),"grid mode mismatch");
             snap("snapToGeometry");require(canvas->gridSnapEnabled() && canvas->geometrySnapEnabled(),"both modes mismatch");

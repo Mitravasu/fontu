@@ -7,7 +7,10 @@
 namespace fontu {
 using ShapeId = std::uint64_t;
 enum class ShapeKind { Rectangle, Ellipse };
-struct Shape { ShapeId id; QPainterPath path; };
+enum class ShapePaint { Filled, Stroke };
+struct Shape { ShapeId id; QPainterPath path; ShapePaint paint = ShapePaint::Filled; };
+struct PenAnchor { QPointF position; QPointF tangent; };
+QPainterPath makePenPath(const std::vector<PenAnchor> &anchors, bool closed = false);
 QPainterPath makeShape(ShapeKind kind, const QRectF &bounds);
 QPainterPath translated(const QPainterPath &path, const QPointF &delta);
 QPainterPath resized(const QPainterPath &path, const QRectF &bounds);
@@ -16,7 +19,7 @@ class Document {
 public:
     const std::vector<Shape> &shapes() const { return shapes_; }
     const Shape *find(ShapeId id) const;
-    std::optional<ShapeId> addPath(const QPainterPath &path);
+    std::optional<ShapeId> addPath(const QPainterPath &path, ShapePaint paint = ShapePaint::Filled);
     bool replacePath(ShapeId id, const QPainterPath &path);
     void select(std::optional<ShapeId> id);
     std::optional<ShapeId> selection() const { return selected_; }

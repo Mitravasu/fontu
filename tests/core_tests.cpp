@@ -7,6 +7,26 @@ using namespace fontu;
 class CoreTests : public QObject {
     Q_OBJECT
 private slots:
+    void penStrokeGeometry() {
+        Document document;
+        Viewport view;
+        view.reset({0, 0});
+        const auto path = makePenPath({{{0, 0}, {}}, {{50, 100}, {}}, {{100, 0}, {}}});
+        const auto id = document.addPath(path, ShapePaint::Stroke);
+        QVERIFY(id);
+        QVERIFY(!document.hitTest({50, 25}, 3));
+        QCOMPARE(document.hitTest({50, 100}, 3), id);
+        QVERIFY(!snapPoint({25, 0}, document, view, {false, true}));
+        auto snap = snapPoint({25, -50}, document, view, {false, true});
+        QVERIFY(snap);
+        QCOMPARE(snap->point, QPointF(25, -50));
+        const auto horizontal = makePenPath({{{0, 10}, {}}, {{100, 10}, {}}});
+        QCOMPARE(resized(horizontal, {20, 30, 200, 0}).boundingRect(), QRectF(20, 30, 200, 0));
+        const auto vertical = makePenPath({{{10, 0}, {}}, {{10, 100}, {}}});
+        QCOMPARE(resized(vertical, {30, 20, 0, 200}).boundingRect(), QRectF(30, 20, 0, 200));
+        QVERIFY(resized(horizontal, {20, 30, 0, 0}).isEmpty());
+        QVERIFY(resized(vertical, {20, 30, 0, 0}).isEmpty());
+    }
     void geometry() {
         auto rectangle = makeShape(ShapeKind::Rectangle, QRectF(40, 60, -30, -40));
         QCOMPARE(rectangle.boundingRect(), QRectF(10, 20, 30, 40));

@@ -1,6 +1,6 @@
 ---
 name: verify-fontu
-description: Verify fontu's Qt desktop canvas after changes to drawing, editing, navigation, or Snap controls. Drive the production window with Qt events and capture screenshots and assertions.
+description: Verify fontu's Qt desktop canvas after changes to shape drawing, Pen paths, editing, navigation, or Snap controls. Drive the production window with Qt events and capture screenshots and assertions.
 ---
 
 # Verify fontu
@@ -37,15 +37,15 @@ If anything looks wrong, start a fresh helper run and inspect its first record, 
 
 ## Drive
 
-`control-fontu` accepts `drawing`, `editing`, `navigation`, and `snapping`. Each invocation starts a fresh empty document and executes the corresponding recipe in the feature map. Toolbar handles are their exact action text. Snap handles are `snapToGrid` and `snapToGeometry`. Canvas coordinates are logical pixels relative to the widget. The helper uses the production window's default 1100 by 760 sizing.
+`control-fontu` accepts `drawing`, `pen`, `editing`, `navigation`, and `snapping`. Each invocation starts a fresh empty document and executes the corresponding recipe in the feature map. Toolbar handles are their exact action text. Snap handles are `snapToGrid` and `snapToGeometry`. Canvas coordinates are logical pixels relative to the widget. The helper uses the production window's default 1100 by 760 sizing.
 
-For Snap runs, the helper makes the production menu local with `setNativeMenuBar(false)` because the offscreen backend has no OS menu. It clicks that menu's widget and its actions. This proves the production toggle connections and checks all four toggle combinations. The snapping recipe also captures pre-press drawing hover circles and asserts that a drawn start matches the geometry target. It does not prove the macOS menu bar.
+For Snap and Pen runs, the helper makes the production menu local with `setNativeMenuBar(false)` because the offscreen backend has no OS menu. It clicks that menu's widget and its actions. The snapping recipe proves the production toggle connections and checks all four toggle combinations. It also captures pre-press drawing hover circles and asserts that a drawn start matches the geometry target. The Pen recipe verifies anchor and handle snapping with exact path elements. These runs do not prove the macOS menu bar.
 
 For user reports involving OS-specific behavior, use Computer Use on a separately launched, positively identified disposable instance if native observation and input permissions are available. Verify ownership before any input. This skill's event proof cannot substitute for that check. If safe isolation or permissions are unavailable, record the unmet precondition and leave that entry point unverified.
 
 ## Evidence
 
-Evidence stays in the exact directory passed to `--evidence`, outside the temporary build. Retain `run.json`, `build.log`, `app.log`, `actions.jsonl`, and numbered PNGs. Visible popup menus have additional `-menu.png` images linked in their state record. Failure diagnostics also survive. Each state record names its action, feature, backend, tool, selection, snap options, zoom, shape bounds, and screenshot. Drag previews capture the held gesture before release. Read-only state assertions accompany screenshots so a drawn shape is checked by its expected bounds and path type.
+Evidence stays in the exact directory passed to `--evidence`, outside the temporary build. Retain `run.json`, `build.log`, `app.log`, `actions.jsonl`, and numbered PNGs. Visible popup menus have additional `-menu.png` images linked in their state record. Failure diagnostics also survive. Each state record names its action, feature, backend, tool, selection, snap options, zoom, shape bounds, path elements, and screenshot. Drag previews capture the held gesture before release. Read-only state assertions accompany screenshots so a drawn shape is checked by its expected bounds and path type.
 
 Require the initial doctor record, action records for every entry point claimed, the corresponding screenshots, the final `PASS:` record, and exit zero. Inspect screenshots for visible app identity and the claimed change. Report a skipped entry point separately. `snapping` proves menu toggles, drawing hover markers for grid/geometry/both, unchanged document state on hover, and a geometry-snapped drawing start. Moving and resizing snap effects, all eight resize handles, focus-loss cancellation, crossing resize anchors, overlap order, and wheel limits need additional production-window or native recipes before a full feature claim.
 

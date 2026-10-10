@@ -46,6 +46,297 @@ void prepare(Canvas &canvas) {
 class CanvasTests : public QObject {
     Q_OBJECT
 private slots:
+    void penClosedFilledShape() {
+        Canvas canvas;
+        prepare(canvas);
+        canvas.setTool(Tool::Pen);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 100});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {300, 100});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {200, 300});
+        movePointer(canvas, {106, 100}, Qt::NoButton);
+        QCOMPARE(canvas.cursor().shape(), Qt::PointingHandCursor);
+        QTest::keyPress(&canvas, Qt::Key_Space);
+        QCOMPARE(canvas.cursor().shape(), Qt::OpenHandCursor);
+        QTest::keyRelease(&canvas, Qt::Key_Space);
+        QCOMPARE(canvas.cursor().shape(), Qt::PointingHandCursor);
+        QVERIFY(canvas.document().shapes().empty());
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::NoModifier, {106, 100});
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(1));
+        const auto shape = canvas.document().shapes()[0];
+        QCOMPARE(shape.paint, ShapePaint::Filled);
+        QCOMPARE(shape.path.elementCount(), 4);
+        QCOMPARE(QPointF(shape.path.elementAt(3)), QPointF(-300, 200));
+        QCOMPARE(canvas.document().selection(), std::optional<ShapeId>(shape.id));
+        QCOMPARE(canvas.tool(), Tool::Pen);
+        movePointer(canvas, {150, 150});
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::NoModifier, {150, 150});
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(1));
+        QCOMPARE(canvas.document().shapes()[0].path, shape.path);
+        canvas.setTool(Tool::Select);
+        QTest::keyClick(&canvas, Qt::Key_Escape);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {200, 180});
+        QCOMPARE(canvas.document().selection(), std::optional<ShapeId>(shape.id));
+        drag(canvas, {200, 180}, {250, 200});
+        QCOMPARE(canvas.viewport().transform().mapRect(canvas.document().shapes()[0].path.boundingRect()),
+                 QRectF(150, 120, 200, 200));
+    }
+    void penCurvedClosingSegment() {
+        Canvas canvas;
+        prepare(canvas);
+        canvas.setTool(Tool::Pen);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 100});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {300, 100});
+        drag(canvas, {200, 300}, {230, 280});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 100});
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(1));
+        const auto &shape = canvas.document().shapes()[0];
+        QCOMPARE(shape.paint, ShapePaint::Filled);
+        QCOMPARE(shape.path.elementCount(), 8);
+        QVERIFY(shape.path.elementAt(5).isCurveTo());
+        QCOMPARE(QPointF(shape.path.elementAt(5)), QPointF(-170, 20));
+        QCOMPARE(QPointF(shape.path.elementAt(6)), QPointF(-300, 200));
+        QCOMPARE(QPointF(shape.path.elementAt(7)), QPointF(-300, 200));
+        QCOMPARE(shape.path.currentPosition(), QPointF(-300, 200));
+    }
+    void penClosureMinimumAndCaptureDistance() {
+        Canvas canvas;
+        prepare(canvas);
+        canvas.setTool(Tool::Pen);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 100});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 100});
+        QVERIFY(canvas.document().shapes().empty());
+        QTest::keyClick(&canvas, Qt::Key_Escape);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 100});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {300, 100});
+        movePointer(canvas, {100, 100}, Qt::NoButton);
+        QCOMPARE(canvas.cursor().shape(), Qt::CrossCursor);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 100});
+        QVERIFY(canvas.document().shapes().empty());
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(1));
+        QCOMPARE(canvas.document().shapes()[0].paint, ShapePaint::Stroke);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 100});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {300, 100});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {200, 300});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {109, 100});
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(1));
+        QTest::keyClick(&canvas, Qt::Key_Enter);
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(2));
+        QCOMPARE(canvas.document().shapes()[1].paint, ShapePaint::Stroke);
+        QCOMPARE(canvas.document().shapes()[1].path.elementCount(), 4);
+        QCOMPARE(QPointF(canvas.document().shapes()[1].path.elementAt(3)), QPointF(-291, 200));
+    }
+    void penClosureAfterNavigation() {
+        for (const auto delta : {-240, 240}) {
+            Canvas canvas;
+            prepare(canvas);
+            canvas.setGridSnapEnabled(true);
+            canvas.setTool(Tool::Pen);
+            QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {103, 102});
+            QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {298, 102});
+            QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {198, 298});
+            drag(canvas, {400, 300}, {450, 320}, Qt::MiddleButton);
+            zoom(canvas, {400, 300}, delta);
+            const auto first = canvas.viewport().toScreen({-300, 200});
+            movePointer(canvas, first.toPoint() + QPoint(7, 0), Qt::NoButton);
+            QCOMPARE(canvas.cursor().shape(), Qt::PointingHandCursor);
+            QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, first.toPoint() + QPoint(7, 0));
+            QCOMPARE(canvas.document().shapes().size(), std::size_t(1));
+            const auto &shape = canvas.document().shapes()[0];
+            QCOMPARE(shape.paint, ShapePaint::Filled);
+            QCOMPARE(shape.path.elementCount(), 4);
+            QCOMPARE(QPointF(shape.path.elementAt(0)), QPointF(-300, 200));
+            QCOMPARE(QPointF(shape.path.elementAt(1)), QPointF(-100, 200));
+            QCOMPARE(QPointF(shape.path.elementAt(2)), QPointF(-200, 0));
+            QCOMPARE(QPointF(shape.path.elementAt(3)), QPointF(-300, 200));
+        }
+    }
+    void penClosureDraftLifecycle() {
+        Canvas canvas;
+        prepare(canvas);
+        canvas.setTool(Tool::Pen);
+        for (int path = 0; path < 2; ++path) {
+            const int offset = path * 250;
+            QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100 + offset, 100});
+            QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {300 + offset, 100});
+            QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {200 + offset, 300});
+            QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100 + offset, 100});
+            QCOMPARE(canvas.document().shapes().size(), std::size_t(path + 1));
+            QTest::keyClick(&canvas, Qt::Key_Return);
+            QCOMPARE(canvas.document().shapes().size(), std::size_t(path + 1));
+        }
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 400});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {300, 400});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {200, 500});
+        movePointer(canvas, {100, 400}, Qt::NoButton);
+        QCOMPARE(canvas.cursor().shape(), Qt::PointingHandCursor);
+        QTest::keyClick(&canvas, Qt::Key_Escape);
+        QCOMPARE(canvas.cursor().shape(), Qt::CrossCursor);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 400});
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(2));
+        QTest::keyClick(&canvas, Qt::Key_Escape);
+    }
+    void penStraightAndZigzag() {
+        Canvas canvas;
+        prepare(canvas);
+        QTest::keyClick(&canvas, Qt::Key_P);
+        QCOMPARE(canvas.tool(), Tool::Pen);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 100});
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        QVERIFY(canvas.document().shapes().empty());
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {200, 200});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {300, 100});
+        movePointer(canvas, {400, 200}, Qt::NoButton);
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(1));
+        const auto &shape = canvas.document().shapes()[0];
+        QCOMPARE(shape.paint, ShapePaint::Stroke);
+        QCOMPARE(shape.path.elementCount(), 3);
+        QCOMPARE(QPointF(shape.path.elementAt(0)), QPointF(-300, 200));
+        QCOMPARE(QPointF(shape.path.elementAt(1)), QPointF(-200, 100));
+        QCOMPARE(QPointF(shape.path.elementAt(2)), QPointF(-100, 200));
+        QCOMPARE(canvas.tool(), Tool::Pen);
+        QVERIFY(!canvas.document().hitTest({-200, 175}, 5));
+        QCOMPARE(canvas.document().hitTest({-200, 100}, 5), std::optional<ShapeId>(shape.id));
+        canvas.setTool(Tool::Select);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {200, 125});
+        QVERIFY(!canvas.document().selection());
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {200, 200});
+        QCOMPARE(canvas.document().selection(), std::optional<ShapeId>(shape.id));
+        canvas.setTool(Tool::Pen);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {350, 300});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {450, 300});
+        QTest::keyClick(&canvas, Qt::Key_Enter);
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(2));
+        QCOMPARE(canvas.document().shapes()[1].path.boundingRect(), QRectF(-50, 0, 100, 0));
+    }
+    void penCubicAndCommitTiming() {
+        Canvas canvas;
+        prepare(canvas);
+        canvas.setTool(Tool::Pen);
+        drag(canvas, {100, 100}, {130, 130});
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::NoModifier, {200, 200});
+        movePointer(canvas, {230, 180});
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        QVERIFY(canvas.document().shapes().empty());
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::NoModifier, {230, 180});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {300, 100});
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(1));
+        const auto &path = canvas.document().shapes()[0].path;
+        QCOMPARE(path.elementCount(), 7);
+        QCOMPARE(QPointF(path.elementAt(0)), QPointF(-300, 200));
+        QCOMPARE(QPointF(path.elementAt(1)), QPointF(-300, 200));
+        QCOMPARE(QPointF(path.elementAt(2)), QPointF(-230, 80));
+        QCOMPARE(QPointF(path.elementAt(3)), QPointF(-200, 100));
+        QCOMPARE(QPointF(path.elementAt(4)), QPointF(-170, 120));
+        QCOMPARE(QPointF(path.elementAt(5)), QPointF(-100, 200));
+        QCOMPARE(QPointF(path.elementAt(6)), QPointF(-100, 200));
+        QVERIFY(path.elementAt(1).isCurveTo());
+        QVERIFY(path.elementAt(4).isCurveTo());
+    }
+    void penSnappedAnchorsAndHandles() {
+        Canvas canvas;
+        prepare(canvas);
+        canvas.setGridSnapEnabled(true);
+        canvas.setTool(Tool::Pen);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {103, 102});
+        drag(canvas, {198, 199}, {227, 176});
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        const auto &gridPath = canvas.document().shapes()[0].path;
+        QCOMPARE(QPointF(gridPath.elementAt(0)), QPointF(-300, 200));
+        QCOMPARE(QPointF(gridPath.elementAt(2)), QPointF(-225, 75));
+        QCOMPARE(QPointF(gridPath.elementAt(3)), QPointF(-200, 100));
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {303, 302});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {398, 399});
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        QCOMPARE(canvas.document().shapes()[1].path.elementCount(), 2);
+        canvas.setGridSnapEnabled(false);
+        canvas.setTool(Tool::Rectangle);
+        drag(canvas, {500, 100}, {600, 200});
+        canvas.setGeometrySnapEnabled(true);
+        canvas.setTool(Tool::Pen);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {497, 130});
+        drag(canvas, {602, 180}, {602, 97});
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        const auto &geometryPath = canvas.document().shapes()[3].path;
+        QCOMPARE(QPointF(geometryPath.elementAt(0)), QPointF(100, 170));
+        QCOMPARE(QPointF(geometryPath.elementAt(2)), QPointF(200, 40));
+        QCOMPARE(QPointF(geometryPath.elementAt(3)), QPointF(200, 120));
+    }
+    void penCancellation() {
+        Canvas canvas;
+        prepare(canvas);
+        for (int cancel = 0; cancel < 7; ++cancel) {
+            canvas.setTool(Tool::Pen);
+            QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 100});
+            QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {200, 200});
+            switch (cancel) {
+            case 0: QTest::keyClick(&canvas, Qt::Key_Escape); break;
+            case 1: canvas.setTool(Tool::Select); canvas.setTool(Tool::Pen); break;
+            case 2: canvas.setGridSnapEnabled(!canvas.gridSnapEnabled()); break;
+            case 3: canvas.setGeometrySnapEnabled(!canvas.geometrySnapEnabled()); break;
+            case 4: canvas.resetView(); break;
+            case 5: { QFocusEvent lost(QEvent::FocusOut); QApplication::sendEvent(&canvas, &lost); break; }
+            case 6: canvas.resize(820, 620); QApplication::processEvents(); break;
+            }
+            QTest::keyClick(&canvas, Qt::Key_Return);
+            QVERIFY(canvas.document().shapes().empty());
+        }
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 100});
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::NoModifier, {200, 200});
+        movePointer(canvas, {230, 180});
+        QTest::keyClick(&canvas, Qt::Key_Escape);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::NoModifier, {230, 180});
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        QVERIFY(canvas.document().shapes().empty());
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 100});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {200, 200});
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(1));
+    }
+    void penDraftSurvivesNavigation() {
+        Canvas canvas;
+        prepare(canvas);
+        canvas.setTool(Tool::Pen);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 100});
+        drag(canvas, {400, 300}, {450, 320}, Qt::MiddleButton);
+        zoom(canvas, {400, 300}, 120);
+        const auto screen = canvas.viewport().toScreen({-200, 100});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, screen.toPoint());
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(1));
+        QCOMPARE(QPointF(canvas.document().shapes()[0].path.elementAt(0)), QPointF(-300, 200));
+        QVERIFY(QLineF(QPointF(canvas.document().shapes()[0].path.elementAt(1)), QPointF(-200, 100)).length() < 1e-7);
+    }
+    void penAxisAlignedMoveResizeDelete() {
+        Canvas canvas;
+        prepare(canvas);
+        canvas.setTool(Tool::Pen);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {100, 100});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {200, 100});
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        canvas.setTool(Tool::Select);
+        drag(canvas, {150, 100}, {170, 130});
+        QCOMPARE(canvas.viewport().transform().mapRect(canvas.document().shapes()[0].path.boundingRect()), QRectF(120, 130, 100, 0));
+        drag(canvas, {220, 130}, {270, 150});
+        QCOMPARE(canvas.viewport().transform().mapRect(canvas.document().shapes()[0].path.boundingRect()), QRectF(120, 130, 150, 0));
+        QTest::keyClick(&canvas, Qt::Key_Delete);
+        QVERIFY(canvas.document().shapes().empty());
+        canvas.setTool(Tool::Pen);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {300, 100});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {300, 200});
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        canvas.setTool(Tool::Select);
+        drag(canvas, {300, 150}, {320, 180});
+        QCOMPARE(canvas.viewport().transform().mapRect(canvas.document().shapes()[0].path.boundingRect()), QRectF(320, 130, 0, 100));
+        drag(canvas, {320, 230}, {350, 280});
+        QCOMPARE(canvas.viewport().transform().mapRect(canvas.document().shapes()[0].path.boundingRect()), QRectF(320, 130, 0, 150));
+        QTest::keyClick(&canvas, Qt::Key_Backspace);
+        QVERIFY(canvas.document().shapes().empty());
+    }
     void drawingHoverAndCleanup() {
         Canvas canvas;
         prepare(canvas);

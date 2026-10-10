@@ -19,7 +19,7 @@ int main(int argc, char **argv) {
     auto *group = new QActionGroup(&window);
     const std::pair<QString, fontu::Tool> tools[] = {
         {"Select (V)", fontu::Tool::Select}, {"Rectangle (R)", fontu::Tool::Rectangle},
-        {"Ellipse (E)", fontu::Tool::Ellipse}};
+        {"Ellipse (E)", fontu::Tool::Ellipse}, {"Pen (P)", fontu::Tool::Pen}};
     for (const auto &entry : tools) {
         const auto tool = entry.second;
         auto *action = toolbar->addAction(entry.first);
@@ -40,7 +40,13 @@ int main(int argc, char **argv) {
         canvas->resetView();
         canvas->setFocus();
     });
-    window.statusBar()->showMessage("Drag draws or moves shapes • Handles resize • Wheel zooms • Space+drag pans • Delete removes selection • Esc cancels or clears selection");
+    const auto showControls = [&window](fontu::Tool tool) {
+        window.statusBar()->showMessage(tool == fontu::Tool::Pen
+            ? "Click adds anchors • Drag sets curve handles • Enter finishes • Esc cancels • Wheel zooms • Space+drag pans"
+            : "Drag draws or moves shapes • Handles resize • Wheel zooms • Space+drag pans • Delete removes selection • Esc cancels or clears selection");
+    };
+    QObject::connect(canvas, &fontu::Canvas::toolChanged, &window, showControls);
+    showControls(canvas->tool());
     window.resize(1100, 760);
     window.show();
     canvas->setFocus();

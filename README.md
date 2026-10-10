@@ -1,6 +1,6 @@
 # fontu
 
-A native Qt 6 / C++ vector canvas for font creation. Milestone 1 supports rectangles and ellipses, selection, movement, eight resize handles, deletion, a grid, optional snapping to the grid and shape geometry, zoom, and pan. Geometry remains editable paths in document space.
+A native Qt 6 / C++ vector canvas for font creation. Milestone 1 supports rectangles, ellipses, open pen paths, filled closed pen shapes, selection, movement, eight resize handles, deletion, a grid, optional snapping to the grid and shape geometry, zoom, and pan. Geometry remains editable paths in document space.
 
 ## Build and launch
 
@@ -27,45 +27,54 @@ On Linux, run `./build/fontu`. On Windows, run `build/Debug/fontu.exe` or the ex
 | Select tool | Toolbar or V |
 | Rectangle tool | Toolbar or R |
 | Ellipse tool | Toolbar or E |
-| Create a shape | Drag with the left mouse button |
-| Select / move | Select tool, click a shape / drag its interior |
+| Pen tool | Toolbar or P |
+| Add a pen anchor | Click with the left mouse button |
+| Curve at a pen anchor | Drag a second or later anchor to set symmetric handles |
+| Finish an open pen path | Enter or Return after releasing the mouse |
+| Close a filled pen shape | Click the first anchor after adding at least three anchors |
+| Create a rectangle or ellipse | Drag with the left mouse button |
+| Select / move | Select tool, click a shape / drag its fill or outline |
 | Resize | Select tool, drag a corner or edge handle |
 | Snap to grid / shape geometry | Independent checkboxes in the Snap menu |
 | Delete selection | Delete or Backspace |
 | Zoom at pointer | Mouse wheel or vertical trackpad scroll |
 | Pan | Middle-button drag or hold Space and left-drag |
 | Reset view | Toolbar or 0 |
-| Cancel an edit | Escape during a draw, move, or resize |
+| Cancel an edit | Escape during a draw, move, resize, or pen draft |
 | Clear selection | Escape when idle or click empty canvas with Select |
 
-Draw several shapes with R and E, switch to V, select and drag a shape, resize it with a handle, zoom and pan, then delete it. The status bar shows the controls. New shapes are selected automatically. Overlapping shapes select in reverse drawing order. Shapes smaller than three screen pixels on either axis are discarded when created.
+Draw several shapes with R and E, switch to V, select and drag a shape, resize it with a handle, zoom and pan, then delete it. The status bar shows the controls. New shapes are selected automatically. Overlapping shapes select in reverse drawing order. Rectangles and ellipses smaller than three screen pixels on either axis are discarded when created.
 
-Losing canvas focus or changing tools cancels an unfinished geometry edit. Escape during panning ends the gesture and keeps the current view. Resizing across the opposite edge normalizes the bounds without mirroring the path.
+With P, click anchors for straight segments. Drag a second or later anchor to curve the incoming and following segments with symmetric handles. The first anchor has no handles. After adding at least three anchors, click within eight logical screen pixels of the first anchor to close and fill the shape immediately. A ring marks the first anchor. Hovering over it previews the filled shape and shows a hand cursor. The closing segment preserves the last anchor's curve handle. Select a closed shape by its interior or outline.
 
-Snapping starts with both options off. Enable either option or both in the Snap menu. Drawing snaps the start and end points; moving snaps the shape's bounds corners, edge midpoints, or center; resizing snaps the dragged handle while keeping the opposite bounds fixed. Targets must be within eight logical screen pixels, so zoom does not change the capture distance. Grid targets use the visible adaptive grid intersections. Edge handles snap to grid lines on their adjustable axis. Shape geometry targets include actual path outlines and bounds snap points. An amber circle marks the winning target during a gesture. Changing a snap option cancels an unfinished edit.
+Enter or Return finishes an open stroke with at least two anchors after mouse release. Select open strokes near their outlines. Both finish controls keep the Pen tool active. Hover previews the next segment; it does not add an anchor. Escape discards the entire unfinished path, including between clicks. Horizontal paths have left and right resize handles; vertical paths have top and bottom handles. Resizing preserves their collapsed axis.
+
+Losing canvas focus, changing tools, resizing the canvas, or resetting the view cancels an unfinished geometry edit. Pen drafts survive zoom and pan. Escape during panning ends the gesture and keeps the current view. Resizing across the opposite edge normalizes the bounds without mirroring the path.
+
+Snapping starts with both options off. Enable either option or both in the Snap menu. Drawing snaps the start and end points; pen anchors and dragged handle endpoints use the same targets; moving snaps the shape's bounds corners, edge midpoints, or center; resizing snaps the dragged handle while keeping the opposite bounds fixed. Targets must be within eight logical screen pixels, so zoom does not change the capture distance. Grid targets use the visible adaptive grid intersections. Edge handles snap to grid lines on their adjustable axis. Shape geometry targets include actual path outlines and bounds snap points. An amber circle marks the winning target during a gesture. Changing a snap option cancels an unfinished edit.
 
 ## Architecture
 
-- `src/document.*` owns ordered shapes, stable IDs, and single selection. Shape geometry is a `QPainterPath` containing lines and cubic curves, with no widget or screen coordinates. Geometry functions construct and transform paths.
+- `src/document.*` owns ordered shapes, stable IDs, and single selection. Each shape records whether it is filled or stroked. Shape geometry is a `QPainterPath` containing lines and cubic curves, with no widget or screen coordinates. Geometry functions construct and transform paths.
 - `src/viewport.*` maps an unbounded y-up document plane to y-down logical screen pixels, with cursor-anchored zoom. Rendering and input share this mapping.
-- `src/canvas.*` paints paths, an adaptive grid, and fixed-screen-size handles, and handles gestures. Move/resize updates derive from the original path snapshot.
+- `src/canvas.*` paints paths, an adaptive grid, and fixed-screen-size handles, and handles gestures. Move/resize updates derive from the original path snapshot. Pen drafts store document-space anchors and tangents until committed.
 - `src/snapping.*` queries grid and path targets in screen space, excludes the edited shape by ID, and returns the nearest eligible target.
 - `src/snap_menu.*` adds the two independent snap actions; `src/main.cpp` creates the native window and tool actions.
 
 The [typography domain reference](docs/typography_domain_reference.md) defines font terminology. The [terminology audit](docs/terminology-audit.md) records how it applies to the current canvas.
 
-See [the milestone design](docs/milestone-1-design.md) for decisions and the comparison with Graphics View. A future pen tool can add arbitrary cubic paths to the document. The current path validation requires positive bounds on both axes; horizontal/vertical open paths will need that check relaxed. QPainterPath is the in-memory geometry representation, not a proposed persistent font format.
+See [the milestone design](docs/milestone-1-design.md) for decisions and the comparison with Graphics View. Pen paths add lines and cubic curves to the document. Path validation accepts extent on either axis. Rectangle and ellipse creation still requires extent on both axes. QPainterPath is the in-memory geometry representation, not a proposed persistent font format.
 
 ## Verification
 
 `core_tests` checks normalized bounds, ellipse containment, curve preservation, movement and resizing, document selection/deletion, stacking-order hit testing, inverse coordinate mapping, and zoom limits and anchors. Snapping checks cover adaptive grid spacing, the fixed screen tolerance, nearest-target selection, exact ties, shape exclusion, curve targets, and constrained outline intersections.
 
-`canvas_tests` sends mouse, wheel, and keyboard events to the actual widget. It checks drawing, tiny/cancelled drags, overlapping selection, moving, deleting, every resize handle, crossing the resize anchor, off-center handle presses, pan/zoom followed by editing, view reset, Escape/tool-change cancellation, and focus-loss rollback. Snapping cases cover menu keyboard/action activation and all toggle states, snapped drawing/moving/resizing, off-center handles, curve outlines, side-handle constraints, self-exclusion, competing grid/geometry targets, zoom/pan mapping, and toggle-change rollback. CTest runs this suite with Qt's offscreen backend.
+`canvas_tests` sends mouse, wheel, and keyboard events to the actual widget. It checks drawing, tiny/cancelled drags, overlapping selection, moving, deleting, every resize handle, crossing the resize anchor, off-center handle presses, pan/zoom followed by editing, view reset, Escape/tool-change cancellation, and focus-loss rollback. Snapping cases cover menu keyboard/action activation and all toggle states, snapped drawing/moving/resizing, off-center handles, curve outlines, side-handle constraints, self-exclusion, competing grid/geometry targets, zoom/pan mapping, and toggle-change rollback. Pen cases cover straight and cubic segments, exact controls, commit timing, cancellation, snapped anchors and handles, draft navigation, stroke hit testing, and horizontal/vertical movement and resizing. Closing cases check filled triangles, curved closing segments, interior selection and movement, the minimum anchor count, screen capture distance, closure after zoom and pan, and draft cleanup. CTest runs this suite with Qt's offscreen backend.
 
 The canvas suite also passed with the native macOS Qt backend, and a rendered canvas image was inspected. Native test windows do not take desktop focus because the tests inject Qt events directly; focus loss is tested explicitly. Desktop UI automation was unavailable because Computer Use permissions were not granted, so an OS-driven mouse/keyboard walkthrough remains unverified.
 
 ## Current limitations
 
-The document is session-only: there is no saving, autosave, or undo. Closing the window loses its shapes. Selection is limited to one shape. Resizing uses axis-aligned bounds. There is no rotation, node editing, pen tool, Shape Builder, or font export in this milestone.
+The document is session-only: there is no saving, autosave, or undo. Closing the window loses its shapes. Selection is limited to one shape. Resizing uses axis-aligned bounds. There is no rotation, node editing, independent pen handles, Shape Builder, or font export in this milestone. Pen handles cannot be edited after committing a path.
 
 Geometry snap queries use Qt's screen-space polygon approximation of curves. Stored paths retain their cubic segments. This is suitable for interactive canvas snapping, not exact curve intersections or font construction. Bounds snap points include points inside shapes and ellipse bounds corners, which can also be snap targets.
