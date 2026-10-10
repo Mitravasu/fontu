@@ -117,11 +117,8 @@ bool inside(const QPolygonF &inner, const QPolygonF &outer) {
     return false;
 }
 
-// Each shape is oriented on its own so its winding number is 1 where the canvas
-// fills it and 0 elsewhere. Summed under nonzero, overlapping shapes then union
-// without flattening their curves.
-std::vector<Contour> shapeContours(const Shape &shape, Placement p, const ProjectGlyph &glyph,
-                                   std::vector<ExportWarning> &warnings) {
+std::vector<Contour> paintBoundaries(const Shape &shape, Placement p, const ProjectGlyph &glyph,
+                                     std::vector<ExportWarning> &warnings) {
     auto source = shape.path;
     if (edgesCross(source)) {
         source = source.simplified();
@@ -281,7 +278,7 @@ FontDescriptionResult describeFont(const ProjectSnapshot &project, const FontSet
                     ++strokes;
                     continue;
                 }
-                auto contours = shapeContours(shape, p, glyph, result.warnings);
+                auto contours = paintBoundaries(shape, p, glyph, result.warnings);
                 out.contours.insert(out.contours.end(), contours.begin(), contours.end());
             }
         } catch (const OutOfRange &) {

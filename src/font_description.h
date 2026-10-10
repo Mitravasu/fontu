@@ -11,9 +11,6 @@
 
 namespace fontu {
 
-// Font units, y-up, origin at the drawing-area left edge on the baseline.
-// describeFont keeps |x| and |y| at most 16383 so every delta between two
-// points fits the int16 operands of a Type 2 charstring and of glyf later.
 template<int Minimum, int Maximum>
 class FontUnits {
 public:
@@ -42,10 +39,6 @@ struct CubicSegment { FontPoint c1; FontPoint c2; FontPoint end; };
 using ContourSegment = std::variant<LineSegment, CubicSegment>;
 FontPoint segmentEnd(const ContourSegment &segment);
 
-// A closed cycle of segments. The contour starts where its last segment ends,
-// so a duplicated closing point and an open contour have no representation.
-// Filled regions wind counterclockwise and holes clockwise, so the nonzero rule
-// over all contours of a glyph paints the union of its shapes.
 class Contour {
 public:
     static std::optional<Contour> cycle(std::vector<ContourSegment> segments);
@@ -65,7 +58,6 @@ struct FontGlyph {
 
 using GlyphIndex = std::uint16_t;
 
-// Glyph 0 is .notdef by construction, and project glyph i is glyph index i + 1.
 struct GlyphOrder {
     FontGlyph notdef;
     std::vector<FontGlyph> glyphs;
