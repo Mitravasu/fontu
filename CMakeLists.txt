@@ -17,6 +17,9 @@ set_target_properties(fontu PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "fontu"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
     MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}")
+if(APPLE)
+    set_target_properties(fontu PROPERTIES INSTALL_RPATH "@executable_path/../Frameworks")
+endif()
 install(TARGETS fontu BUNDLE DESTINATION . RUNTIME DESTINATION bin)
 install(FILES LICENSE DESTINATION share/licenses/fontu)
 if(UNIX AND NOT APPLE)
