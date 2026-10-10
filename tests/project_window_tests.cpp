@@ -15,6 +15,7 @@
 #include <QClipboard>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QRawFont>
 #include <QtTest>
 #include <memory>
 using namespace fontu;
@@ -285,6 +286,45 @@ private slots:
         QCOMPARE(projectBytes(window.canvas().projectSnapshot()), before);
         QCOMPARE(window.projectPath(), path);
         QVERIFY(window.isProjectDirty());
+        choosePrompt(QMessageBox::Discard);
+        QVERIFY(window.close());
+    }
+    void exportOtfKeepsDirtyStateAndShowsWarnings() {
+        QTemporaryDir directory;
+        ProjectWindow window(nullptr, directory.filePath("fontu"));
+        prepare(window);
+        QVERIFY(window.findChild<QAction *>("exportOtf")->isEnabled());
+        auto snapshot = window.canvas().projectSnapshot();
+        snapshot.glyphs[0].shapes.push_back({1, makeShape(ShapeKind::Rectangle, {-200, 100, 100, 100}), ShapePaint::Filled});
+        window.canvas().restoreProject(snapshot);
+        chooseFile(directory.filePath("project.fontu"));
+        QVERIFY(window.saveProject());
+        chooseFile(directory.filePath("Clean Face"), false, directory.path());
+        QVERIFY(window.exportFontAs());
+        QVERIFY(!window.isProjectDirty());
+        QCOMPARE(window.projectPath(), directory.filePath("project.fontu"));
+        QRawFont clean(directory.filePath("Clean Face.otf"), 1000);
+        QCOMPARE(clean.familyName(), QString("Clean Face"));
+        QCOMPARE(clean.glyphIndexesForString("0"), QList<quint32>{1});
+        QCOMPARE(clean.pathForGlyph(1).boundingRect(), QRectF(300, -200, 100, 100));
+
+        snapshot = window.canvas().projectSnapshot();
+        snapshot.glyphs[1].shapes.push_back({9, makePenPath({{{-100, 0}, {}}, {{100, 100}, {}}}), ShapePaint::Stroke});
+        window.canvas().restoreProject(snapshot);
+        QVERIFY(window.isProjectDirty());
+        const auto before = projectBytes(window.canvas().projectSnapshot());
+        QString shown;
+        chooseFile(directory.filePath("Stroked.otf"));
+        whenModal<QMessageBox>([&shown](QMessageBox *box) {
+            shown = box->text() + "\n" + box->informativeText();
+            box->accept();
+        });
+        QVERIFY(window.exportFontAs());
+        QCOMPARE(shown, QString("Exported Stroked.otf with 1 warning(s).\n"
+                                "“1”: skipped 1 stroke shape(s). Strokes have no width in the font, so only filled shapes export."));
+        QVERIFY(window.isProjectDirty());
+        QCOMPARE(projectBytes(window.canvas().projectSnapshot()), before);
+        QVERIFY(QFile::exists(directory.filePath("Stroked.otf")));
         choosePrompt(QMessageBox::Discard);
         QVERIFY(window.close());
     }

@@ -18,6 +18,7 @@ public:
     bool isProjectDirty() const;
     bool saveProject();
     bool saveProjectAs();
+    bool exportFontAs();
     void openProject();
     void newProject();
     bool hasProject() const;
@@ -41,6 +42,7 @@ private:
     QDockWidget *glyphPanel_;
     QAction *saveAction_;
     QAction *saveAsAction_;
+    QAction *exportOtfAction_;
     QAction *undoAction_;
     QAction *redoAction_;
     Page page_ = Page::Welcome;
