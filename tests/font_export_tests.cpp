@@ -1,4 +1,4 @@
-#include "font_description.h"
+#include "font_export.h"
 #include <QTimeZone>
 #include <QtTest>
 using namespace fontu;
@@ -19,6 +19,28 @@ QPainterPath ring() {
     return path;
 }
 DescribedFont described(const ProjectSnapshot &p) { return std::get<DescribedFont>(describeFont(p, settings())); }
+quint32 bigEndian32(const QByteArray &bytes, int offset) {
+    quint32 value = 0;
+    for (int i = 0; i < 4; ++i) value = value << 8 | quint8(bytes[offset + i]);
+    return value;
+}
+quint32 sum32(QByteArray bytes) {
+    while (bytes.size() % 4) bytes.append('\0');
+    quint32 sum = 0;
+    for (int i = 0; i < bytes.size(); i += 4) sum += bigEndian32(bytes, i);
+    return sum;
+}
+QByteArray table(const QByteArray &font, const char *tag) {
+    const int count = quint8(font[4]) << 8 | quint8(font[5]);
+    for (int i = 0; i < count; ++i) {
+        const int record = 12 + 16 * i;
+        if (font.mid(record, 4) == tag) return font.mid(int(bigEndian32(font, record + 8)), int(bigEndian32(font, record + 12)));
+    }
+    return {};
+}
+QByteArray rectangleFont() {
+    return fontBytes(described(project({{{{1}, "A"}, {filled(1, makeShape(ShapeKind::Rectangle, {0, 0, 20, 30}))}}})).font, FontFormat::Otf);
+}
 std::vector<FontPoint> ends(const Contour &contour) {
     std::vector<FontPoint> result;
     for (const auto &segment : contour.segments()) result.push_back(segmentEnd(segment));
@@ -126,6 +148,50 @@ private slots:
         QCOMPARE(font.names.family, QString("My (Font)"));
         QCOMPARE(font.names.style, QString("Regular"));
         QCOMPARE(font.names.postScriptName, QString("MyFont-Regular"));
+    }
+    void sfntHeaderTableOrderAndChecksums() {
+        const auto bytes = rectangleFont();
+        QCOMPARE(bytes.left(12), QByteArray::fromHex("4f54544f" "0009" "0080" "0003" "0010"));
+        QByteArray tags;
+        for (int i = 0; i < 9; ++i) {
+            const int record = 12 + 16 * i;
+            tags += bytes.mid(record, 4);
+            const auto offset = int(bigEndian32(bytes, record + 8));
+            QCOMPARE(offset % 4, 0);
+            auto data = bytes.mid(offset, int(bigEndian32(bytes, record + 12)));
+            if (bytes.mid(record, 4) == "head") data.replace(8, 4, QByteArray(4, '\0'));
+            QCOMPARE(sum32(data), bigEndian32(bytes, record + 4));
+        }
+        QCOMPARE(tags, QByteArray("CFF OS/2cmapheadhheahmtxmaxpnamepost"));
+        QCOMPARE(sum32(bytes), 0xB1B0AFBAu);
+    }
+    void sameDescriptionEncodesToIdenticalBytes() {
+        QCOMPARE(rectangleFont(), rectangleFont());
+    }
+    void rectangleCharstringOmitsTheClosingLine() {
+        QVERIFY(table(rectangleFont(), "CFF ").contains(QByteArray::fromHex("f8888b15" "9f8b8ba9778b05" "0e")));
+    }
+    void cmapFormat4MapsTheLabel() {
+        QCOMPARE(table(rectangleFont(), "cmap"), QByteArray::fromHex(
+            "0000" "0002" "00000003" "00000014" "00030001" "00000014"
+            "0004" "0020" "0000" "0004" "0004" "0001" "0000"
+            "0041ffff" "0000" "0041ffff" "ffc00001" "00000000"));
+    }
+    void cmapAddsFormat12AboveTheBmp() {
+        const auto font = described(project({{{{1}, QString::fromUcs4(U"\U0001F600", 1)}, {}}})).font;
+        const auto cmap = table(fontBytes(font, FontFormat::Otf), "cmap");
+        QCOMPARE(cmap.left(36), QByteArray::fromHex(
+            "0000" "0004" "00000003" "00000024" "00000004" "0000003c" "00030001" "00000024" "0003000a" "0000003c"));
+        QCOMPARE(cmap.mid(0x3c), QByteArray::fromHex("000c" "0000" "0000001c" "00000000" "00000001" "0001f600" "0001f600" "00000001"));
+    }
+    void headAndHmtxCarryMetrics() {
+        const auto bytes = rectangleFont();
+        const auto head = table(bytes, "head");
+        QCOMPARE(head.mid(18, 2), QByteArray::fromHex("03e8"));
+        QCOMPARE(head.mid(20, 16), QByteArray::fromHex("00000000e57ce625" "00000000e57ce625"));
+        QCOMPARE(head.mid(36, 8), QByteArray::fromHex("0064" "0000" "0384" "02bc"));
+        QCOMPARE(table(bytes, "hmtx"), QByteArray::fromHex("03e80064" "03e801f4"));
+        QCOMPARE(table(bytes, "maxp"), QByteArray::fromHex("00005000" "0002"));
     }
 };
 QTEST_MAIN(FontExportTests)
