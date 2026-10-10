@@ -11,7 +11,7 @@ double gridStep(double zoom) {
     while (step * zoom > 64) step /= 2;
     return step;
 }
-std::array<QPointF, 9> boundsAnchors(const QRectF &r) {
+std::array<QPointF, 9> boundsSnapPoints(const QRectF &r) {
     return {r.topLeft(), QPointF(r.center().x(), r.top()), r.topRight(),
             QPointF(r.right(), r.center().y()), r.bottomRight(),
             QPointF(r.center().x(), r.bottom()), r.bottomLeft(),
@@ -42,7 +42,7 @@ std::optional<SnapResult> snapPoint(const QPointF &point, const Document &docume
             const auto path = viewport.transform().map(shape.path);
             if (!path.boundingRect().adjusted(-snapTolerance, -snapTolerance,
                                              snapTolerance, snapTolerance).contains(point)) continue;
-            for (const auto &anchor : boundsAnchors(path.boundingRect())) consider(anchor);
+            for (const auto &boundsPoint : boundsSnapPoints(path.boundingRect())) consider(boundsPoint);
             // Qt flattens curves after mapping to logical pixels. Stored paths stay cubic.
             for (const auto &polygon : path.toSubpathPolygons()) {
                 for (int i = 1; i < polygon.size(); ++i) {

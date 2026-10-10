@@ -10,7 +10,7 @@ void addSnapMenu(QMenuBar &menuBar, Canvas &canvas) {
     grid->setObjectName("snapToGrid");
     grid->setCheckable(true);
     grid->setChecked(canvas.gridSnapEnabled());
-    auto *geometry = menu->addAction("To geometry");
+    auto *geometry = menu->addAction("To shape geometry");
     geometry->setObjectName("snapToGeometry");
     geometry->setCheckable(true);
     geometry->setChecked(canvas.geometrySnapEnabled());

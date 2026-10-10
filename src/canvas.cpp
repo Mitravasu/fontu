@@ -185,11 +185,11 @@ void Canvas::updateGesture(const QPointF &position) {
         std::optional<SnapResult> best;
         QPointF correction;
         if (position != startScreen_) {
-            for (const auto &anchor : boundsAnchors(rawBounds)) {
-                if (auto snap = snapPoint(anchor, document_, viewport_, snapOptions_, editingId_)) {
+            for (const auto &boundsPoint : boundsSnapPoints(rawBounds)) {
+                if (auto snap = snapPoint(boundsPoint, document_, viewport_, snapOptions_, editingId_)) {
                     if (!best || snap->distance < best->distance) {
                         best = snap;
-                        correction = snap->point - anchor;
+                        correction = snap->point - boundsPoint;
                     }
                 }
             }

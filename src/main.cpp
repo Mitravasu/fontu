@@ -10,7 +10,7 @@ int main(int argc, char **argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName("fontu");
     QMainWindow window;
-    window.setWindowTitle("fontu • Vector canvas");
+    window.setWindowTitle("fontu • Shape canvas");
     auto *canvas = new fontu::Canvas;
     window.setCentralWidget(canvas);
     fontu::addSnapMenu(*window.menuBar(), *canvas);
@@ -40,7 +40,7 @@ int main(int argc, char **argv) {
         canvas->resetView();
         canvas->setFocus();
     });
-    window.statusBar()->showMessage("Drag to draw or move • Handles resize • Wheel zooms • Space+drag or middle drag pans • Delete removes • Esc cancels");
+    window.statusBar()->showMessage("Drag draws or moves shapes • Handles resize • Wheel zooms • Space+drag pans • Delete removes selection • Esc cancels or clears selection");
     window.resize(1100, 760);
     window.show();
     canvas->setFocus();

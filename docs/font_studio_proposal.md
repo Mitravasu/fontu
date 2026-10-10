@@ -5,6 +5,8 @@
 **Primary platforms:** macOS and Windows (Linux desirable)  
 **Working name:** Font Studio (rename freely)
 
+The [typography domain reference](typography_domain_reference.md) defines the terminology used in this proposal. It distinguishes design guides, glyph metrics, and font-level line and clipping metrics. This proposal describes planned behavior; [README.md](../README.md) describes the implemented milestone.
+
 ## 1. Vision
 
 Build a **purpose-built, low-friction font creation application** where a designer focuses on drawing glyphs rather than preparing layers, organizing Inkscape files, converting SVGs, or moving into another application to compile a font.
@@ -24,11 +26,11 @@ This is **not** an effort to reproduce all of Inkscape, Illustrator, Glyphs or F
 
 ## 2. Core principles
 
-- **Glyphs are first-class entities, not layers.** A glyph has outlines, components, width, Unicode mapping and other metrics.
+- **Glyphs are first-class entities, not layers.** A glyph has outlines, components, advance width, Unicode mappings, and other metrics.
 - **Drawing is the product.** Three tools are central: shape creation, pen tool, Shape Builder.
 - **No compulsory layer management.** Internal objects/contours exist, but glyph navigation is the primary organizational unit. Advanced editing layers can be introduced only if justified.
 - **Non-destructive until commitment.** Shape Builder must preview changes before commit and offer reliable undo. Keep source shapes where feasible; do not promise fully reversible booleans in v1.
-- **WYSIWYG with font constraints.** Show baseline, cap/x-height, ascender/descender, origin, advance width, sidebearings, and consistent font units.
+- **WYSIWYG with font constraints.** Show baseline, x-height, cap height, ascender and descender design guides, origin, advance width, sidebearings, and consistent font units. Keep design guides separate from font-level line and clipping metrics.
 - **Portability.** Prefer standards-based editable sources (UFO 3) and a versioned native project state for any richer editing data.
 - **Predictability over feature count.** No hidden changes to outline geometry, no surprise rounding, explicit errors during export.
 - **Test the graphics core independently of the UI.** Geometry and font serialization must be deterministic and unit-testable.
@@ -37,7 +39,7 @@ This is **not** an effort to reproduce all of Inkscape, Illustrator, Glyphs or F
 
 ### 3.1 Project workspace
 
-- Create/open/save a font project, set family/style, units-per-em, vertical metrics.
+- Create/open/save a font project, set family/style, units per em (UPM), design guides, and font-level line and clipping metrics.
 - Glyph grid showing character, glyph name, completion/status, search and filtering.
 - Single-click navigation between glyphs; optional next/previous shortcuts.
 - Autosave with clear unsaved/error state; crash-safe file writes.
@@ -55,7 +57,7 @@ This is **not** an effort to reproduce all of Inkscape, Illustrator, Glyphs or F
 **B. Pen / node tool**
 - Create open and closed paths with line and cubic Bézier segments.
 - Click for corner, click-drag for smooth control handles; close/open contours; join/split.
-- Direct-select anchors and handles; move nodes, adjust handles; smooth/corner conversion.
+- Direct-select on-curve nodes and Bézier control handles; move nodes, adjust handles; smooth/corner conversion.
 - Add/delete nodes, segment selection, snapping, keyboard nudging, zoom/pan.
 - Clear distinction between editable source geometry and rendered output.
 
@@ -71,7 +73,7 @@ This is **not** an effort to reproduce all of Inkscape, Illustrator, Glyphs or F
 
 ### 3.3 Typography workflow
 
-- Standard guides: baseline, x-height, cap height, ascender, descender; editable in font settings.
+- Standard design guides: baseline, x-height, cap height, ascender guide, descender guide; editable in font settings.
 - Per-glyph advance width and left/right sidebearing editing.
 - Text preview renders current in-project outlines, **not a system font pretending to be the output**.
 - Kerning pairs/groups later; basic manual kerning for production end state.
@@ -147,7 +149,7 @@ font-studio/
 6. Reconstruct valid boundaries, maintaining exact cubic subsegments where the backend supports them; else use a controlled, testable approximation path and surface that limitation.
 7. Commit via one undoable document command.
 
-**Font source/export:** UFO 3 / GLIF as the interchange target; GLIF represents outlines, points, components, widths and Unicode. Keep editor-specific parametric shapes, state and any unpublished edits in a versioned native document or UFO `lib` extension. Use `fontmake` via `QProcess` for a first font compiler, with captured diagnostics and pinned dependencies. Validate builds by opening output with a font parser and comparing outlines/metrics where feasible.
+**Font source/export:** UFO 3 / GLIF as the interchange target; GLIF represents outlines, points, anchors, components, advance widths, and Unicode mappings. Keep editor-specific parametric shapes, state and any unpublished edits in a versioned native document or UFO `lib` extension. Use `fontmake` via `QProcess` for a first font compiler, with captured diagnostics and pinned dependencies. Validate builds by opening output with a font parser and comparing outlines/metrics where feasible.
 
 ## 6. Incremental milestones for Codex
 
@@ -161,7 +163,7 @@ Treat each milestone as a separate detailed design + implementation task. Do **n
 | 3. Pen + nodes | Cubic pen, closed contours, direct node editing | Draw and revise `A`/`S`-like curves; reopen losslessly |
 | 4. Boolean spike | Union/difference/intersection on test geometry; document curve fidelity | Golden tests: overlaps, tangencies, holes, near-coincident edges |
 | 5. Shape Builder | Hover regions, additive/subtractive region gestures | Build `A`, `B`, `O` from overlapping shapes with one-action undo |
-| 6. Glyph model | A–Z grid, glyph navigation, font guides, widths/sidebearings | Design 10 glyphs without touching layers or external apps |
+| 6. Glyph model | A–Z grid, glyph navigation, font design guides, advance widths/sidebearings | Design 10 glyphs without touching layers or external apps |
 | 7. Preview | Actual in-project outline preview and basic text layout | Changes to a glyph visibly update sample words |
 | 8. Export | UFO generation, fontmake integration, errors/validation, TTF | Install/use a generated font outside the editor |
 | 9. Typography polish | Kerning, composites, improved editing and build diagnostics | Produce a small, usable Latin font end-to-end |
@@ -203,7 +205,7 @@ Before committing to the Shape Builder's final backend, create visual/golden fix
 5. Near-tangent curves and almost-coincident edges → no slivers, crashes or invalid contours.
 6. Undo/redo of region stroke → exact prior model restored.
 7. Save/reopen → identical geometry and metrics.
-8. Exported glyph → preserved width, fill/counters, installed-font appearance.
+8. Exported glyph → preserved advance width, fill/counters, installed-font appearance.
 
 Track geometry node count, Boolean runtime, hover latency and curve approximation error if flattening is used.
 

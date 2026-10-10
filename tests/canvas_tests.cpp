@@ -111,7 +111,7 @@ private slots:
         canvas.setTool(Tool::Ellipse);
         drag(canvas, {350, 100}, {450, 200});
         canvas.setGeometrySnapEnabled(true);
-        // Draw starts on the ellipse's actual curve, away from bounds anchors.
+        // Draw starts on the ellipse's actual curve, away from bounds snap points.
         canvas.setTool(Tool::Rectangle);
         drag(canvas, {437, 113}, {500, 70});
         const auto curveBounds = canvas.viewport().transform().mapRect(canvas.document().shapes()[3].path.boundingRect());
@@ -143,7 +143,7 @@ private slots:
         drag(canvas, {115, 125}, {225, 225});
         QCOMPARE(canvas.viewport().transform().mapRect(canvas.document().shapes()[1].path.boundingRect()),
                  QRectF(112, 125, 113, 100));
-        // Grid intersection is closer than either the rectangle outline or its anchors.
+        // Grid intersection is closer than either the rectangle outline or its bounds snap points.
         drag(canvas, {98, 248}, {50, 300});
         QCOMPARE(canvas.viewport().transform().mapRect(canvas.document().shapes()[2].path.boundingRect()),
                  QRectF(50, 250, 50, 50));
