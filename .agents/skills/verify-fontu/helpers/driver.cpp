@@ -45,7 +45,8 @@ void record(const QString &action) {
         {"window",window->windowTitle()},{"shapes",shapes},{"tool",int(canvas->tool())},
         {"selected",canvas->document().selection() ? double(*canvas->document().selection()) : -1},
         {"grid",canvas->gridSnapEnabled()},{"geometry",canvas->geometrySnapEnabled()},
-        {"zoom",canvas->viewport().zoom()},{"screenshot",stem + ".png"}};
+        {"canUndo",canvas->canUndo()},{"canRedo",canvas->canRedo()},{"zoom",canvas->viewport().zoom()},{"screenshot",stem + ".png"}};
+    state.insert("controlsHint", window->statusBar()->currentMessage());
     for(auto *menu : window->findChildren<QMenu *>()) {
         if(menu->isVisible()) {
             QString popup=stem + "-menu.png";
@@ -123,19 +124,18 @@ void drag(QPoint from, QPoint to, Qt::MouseButton button=Qt::LeftButton) {
     record("Drag release");
 }
 void snap(const QString &name) {
-    auto *bar=window->menuBar();
-    bar->setNativeMenuBar(false); // Offscreen has no OS menu; expose the same production menu locally.
-    auto *menu=bar->actions().at(0)->menu();
-    auto *action=menu->findChild<QAction *>(name);
-    require(action,"snap action missing");
-    bool previous=action->isChecked();
-    QTest::mouseClick(bar,Qt::LeftButton,Qt::NoModifier,bar->actionGeometry(menu->menuAction()).center());
-    QApplication::processEvents();
-    require(menu->isVisible(),"Snap menu did not open");
-    record("Open Snap menu");
-    QTest::mouseClick(menu,Qt::LeftButton,Qt::NoModifier,menu->actionGeometry(action).center());
+    auto *bar=window->findChild<QToolBar *>();
+    auto *action=bar->findChild<QAction *>(name);
+    require(action && bar->actions().contains(action),"snap toolbar action missing");
+    auto *button=bar->widgetForAction(action);
+    require(button && button->isVisible() && bar->rect().contains(button->geometry()),"snap toolbar button unavailable");
+    const bool previous=action->isChecked();
+    QTest::mouseClick(button,Qt::LeftButton);
     require(action->isChecked()!=previous,"snap toggle failed");
-    record("Snap menu click: " + action->text());
+    require(canvas->gridSnapEnabled()==bar->findChild<QAction *>("snapToGrid")->isChecked()
+            && canvas->geometrySnapEnabled()==bar->findChild<QAction *>("snapToGeometry")->isChecked(),
+            "snap toolbar state disagrees with canvas");
+    record("Snap toolbar click: " + action->text());
 }
 void penClick(QPoint point) {
     QTest::mouseClick(canvas, Qt::LeftButton, Qt::NoModifier, point);
@@ -207,8 +207,8 @@ void pen() {
     key(Qt::Key_Return,"Enter geometry-snapped pen");
     require(canvas->document().shapes().size()==6,"geometry pen not committed");
     pathMatches(5,line,"pen geometry snap missed committed path endpoints");
-    penClick({800,350}); penClick({900,400}); snap("snapToGeometry"); key(Qt::Key_Return,"Enter after Snap menu focus loss");
-    require(canvas->document().shapes().size()==6,"Snap menu failed to cancel pen draft");
+    penClick({800,350}); penClick({900,400}); snap("snapToGeometry"); key(Qt::Key_Return,"Enter after Snap toolbar toggle");
+    require(canvas->document().shapes().size()==6,"Snap toolbar toggle failed to cancel pen draft");
     toolbar("Select (V)");
     const auto cornerStart=corners.elementAt(0), cornerEnd=corners.elementAt(1);
     const auto selectPoint=canvas->viewport().toScreen({(cornerStart.x+cornerEnd.x)/2,(cornerStart.y+cornerEnd.y)/2}).toPoint();
@@ -287,6 +287,154 @@ void pen() {
     require(canvas->document().shapes().size()==8,"nine-screen-pixel click closed outside radius");
     key(Qt::Key_Escape,"Escape outside-radius closure draft");
 }
+QAction *historyAction(const QString &text) {
+    for (auto *action : window->findChild<QToolBar *>()->actions())
+        if (action->text()==text) return action;
+    throw std::runtime_error("history action missing");
+}
+void historyState(bool undo, bool redo) {
+    require(historyAction("Undo")->isEnabled()==undo && historyAction("Redo")->isEnabled()==redo,
+            "history button enabled state mismatch");
+}
+void historyShortcut(QKeySequence::StandardKey standard) {
+    const auto bindings=QKeySequence::keyBindings(standard);
+    require(!bindings.isEmpty(), "standard binding missing");
+    for (const auto &binding : bindings) {
+        QTest::keySequence(canvas,binding);
+        record("Standard shortcut " + binding.toString(QKeySequence::NativeText));
+        if (standard==QKeySequence::Undo) {
+            require(canvas->document().shapes().empty(),"undo shortcut did not remove shape");
+            toolbar("Redo");
+        } else {
+            require(canvas->document().shapes().size()==1,"redo shortcut did not restore shape");
+            toolbar("Undo");
+        }
+    }
+}
+void history() {
+    historyState(false,false);
+    toolbar("Undo"); toolbar("Redo");
+    require(canvas->document().shapes().empty(),"disabled history button changed document");
+    toolbar("Rectangle (R)"); drag({100,100},{220,200});
+    const auto original=canvas->document().shapes()[0];
+    historyState(true,false);
+    historyShortcut(QKeySequence::Undo);
+    toolbar("Undo"); historyState(false,true);
+    historyShortcut(QKeySequence::Redo);
+    toolbar("Redo");
+    require(canvas->document().shapes()[0].id==original.id && canvas->document().shapes()[0].path==original.path,
+            "history failed to preserve shape identity/path");
+    toolbar("Select (V)"); drag({150,150},{180,170});
+    drag({250,220},{280,240});
+    key(Qt::Key_Delete,"Delete");
+    toolbar("Undo"); require(bounds(0)==QRectF(130,120,150,120),"undo delete mismatch");
+    toolbar("Undo"); require(bounds(0)==QRectF(130,120,120,100),"undo resize mismatch");
+    toolbar("Undo"); require(bounds(0)==QRectF(100,100,120,100),"undo move mismatch");
+    drag({150,150},{150,150}); historyState(true,true);
+    toolbar("Reset view (0)"); historyState(true,true);
+    toolbar("Redo"); require(bounds(0)==QRectF(130,120,120,100),"redo move mismatch");
+    toolbar("Redo"); require(bounds(0)==QRectF(130,120,150,120),"redo resize mismatch");
+    toolbar("Redo"); require(canvas->document().shapes().empty(),"redo delete mismatch");
+    toolbar("Undo");
+    toolbar("Ellipse (E)"); drag({400,100},{500,200}); historyState(true,false);
+    toolbar("Undo"); toolbar("Redo");
+    require(bounds(1)==QRectF(400,100,100,100),"new branch redo mismatch");
+    toolbar("Pen (P)"); penClick({600,100}); drag({720,160},{750,180}); penClick({820,210});
+    historyState(true,false);
+    toolbar("Undo"); historyState(true,true);
+    toolbar("Redo"); historyState(true,false);
+    QTest::keySequence(canvas,QKeySequence(QKeySequence::Undo));
+    record("Standard Undo removes final draft vertex");
+    toolbar("Undo"); toolbar("Undo"); historyState(false,true);
+    toolbar("Undo");
+    QTest::keySequence(canvas,QKeySequence(QKeySequence::Undo));
+    require(canvas->document().shapes().size()==2,"zero-vertex draft traversed document history");
+    record("Zero-vertex draft blocks document Undo");
+    toolbar("Redo");
+    QTest::keySequence(canvas,QKeySequence(QKeySequence::Redo));
+    record("Standard Redo restores curved draft vertex");
+    move({840,240},Qt::NoButton); historyState(true,true);
+    key(Qt::Key_Return,"Enter commits restored draft prefix");
+    QPainterPath curved(canvas->viewport().toDocument({600,100}));
+    curved.cubicTo(canvas->viewport().toDocument({600,100}),canvas->viewport().toDocument({690,140}),canvas->viewport().toDocument({720,160}));
+    pathMatches(2,curved,"vertex history changed curved prefix");
+    historyState(true,false);
+    const auto stroke=canvas->document().shapes()[2];
+    toolbar("Undo"); toolbar("Redo");
+    require(canvas->document().shapes()[2].path==stroke.path && canvas->document().shapes()[2].paint==fontu::ShapePaint::Stroke,"pen redo mismatch");
+    QTest::mousePress(canvas,Qt::LeftButton,Qt::NoModifier,{800,100}); move({860,180},Qt::LeftButton);
+    QTest::keySequence(canvas,QKeySequence(QKeySequence::Undo));
+    QTest::mouseRelease(canvas,Qt::LeftButton,Qt::NoModifier,{860,180});
+    key(Qt::Key_Return,"Enter after Undo removes held vertex");
+    require(canvas->document().shapes().size()==3,"held vertex Undo changed completed paths");
+    historyState(false,true);
+    toolbar("Redo"); penClick({930,220}); toolbar("Undo");
+    penClick({960,260}); historyState(true,false);
+    toolbar("Redo"); key(Qt::Key_Return,"Enter commits new draft branch");
+    QPainterPath branch(canvas->viewport().toDocument({800,100}));
+    branch.lineTo(canvas->viewport().toDocument({960,260}));
+    pathMatches(3,branch,"new vertex did not replace draft redo branch");
+    penClick({700,350}); drag({820,400},{850,420});
+    QTest::keySequence(canvas,QKeySequence(QKeySequence::Undo));
+    record("Undo removes dragged vertex");
+    toolbar("Redo"); penClick({760,510}); toolbar("Undo"); toolbar("Redo");
+    penClick({700,350});
+    QPainterPath closed(canvas->viewport().toDocument({700,350}));
+    closed.cubicTo(canvas->viewport().toDocument({700,350}),canvas->viewport().toDocument({790,380}),canvas->viewport().toDocument({820,400}));
+    closed.cubicTo(canvas->viewport().toDocument({850,420}),canvas->viewport().toDocument({760,510}),canvas->viewport().toDocument({760,510}));
+    closed.closeSubpath();
+    pathMatches(4,closed,"closed draft vertex history mismatch",fontu::ShapePaint::Filled);
+    toolbar("Undo"); require(canvas->document().shapes().size()==4,"closed path Undo did not remove whole edit");
+    toolbar("Redo"); pathMatches(4,closed,"closed path Redo mismatch",fontu::ShapePaint::Filled);
+    penClick({900,400}); toolbar("Undo"); historyState(false,true);
+    key(Qt::Key_Escape,"Escape discards zero-vertex redo"); historyState(true,false);
+    penClick({900,400}); toolbar("Undo"); historyState(false,true);
+    toolbar("Select (V)"); historyState(true,false);
+    toolbar("Undo"); require(canvas->document().shapes().size()==4,"tool change did not resume document Undo");
+    toolbar("Redo");
+    record("History buttons, shortcuts, draft vertices and tangents, zero boundary, branching, commits and cancellation verified");
+}
+void statusHint(bool closing) {
+    const auto text = window->statusBar()->currentMessage();
+    require(window->statusBar()->isVisible(), "bottom status bar is hidden");
+    require(window->statusBar()->geometry().top() >= canvas->geometry().bottom(), "status bar overlaps canvas");
+    require(text.contains("Wheel zooms") && text.contains("Space+drag pans"), "navigation hints missing");
+    require(text.contains("Click first anchor to fill") == closing, "Pen closure hint does not match draft");
+    require(window->statusBar()->fontMetrics().horizontalAdvance(text) + 40 <= window->statusBar()->width(),
+            "status hint clips at normal window size");
+}
+void status() {
+    statusHint(false);
+    require(window->statusBar()->currentMessage().contains("Delete removes selection"), "initial Select hint missing");
+    toolbar("Rectangle (R)"); statusHint(false);
+    key(Qt::Key_E,"E"); statusHint(false);
+    toolbar("Pen (P)"); statusHint(false);
+    require(window->statusBar()->currentMessage().contains("Click anchors"), "initial Pen hint missing");
+    penClick({100,100}); penClick({220,100}); penClick({220,200}); statusHint(true);
+    toolbar("Undo"); statusHint(false);
+    toolbar("Redo"); statusHint(true);
+    QTest::keyPress(canvas,Qt::Key_Space);
+    drag({500,350},{520,360});
+    QTest::keyRelease(canvas,Qt::Key_Space); statusHint(true);
+    move({120,110},Qt::NoButton); record("Closure hover keeps bottom hint and clean drawing area"); statusHint(true);
+    key(Qt::Key_Return,"Enter finishes draft"); statusHint(false);
+    penClick({300,100}); penClick({420,100}); penClick({420,200}); statusHint(true);
+    penClick({300,100}); statusHint(false);
+    penClick({500,100}); penClick({620,100}); penClick({620,200}); statusHint(true);
+    key(Qt::Key_Escape,"Escape cancels draft"); statusHint(false);
+    penClick({500,100}); penClick({620,100}); penClick({620,200}); statusHint(true);
+    key(Qt::Key_V,"V cancels draft"); statusHint(false);
+    key(Qt::Key_P,"P"); statusHint(false);
+    penClick({500,100}); penClick({620,100}); penClick({620,200}); statusHint(true);
+    window->resize(1000,720); QApplication::processEvents(); statusHint(false);
+    record("Resize cancels draft and keeps readable bottom hint");
+    toolbar("Select (V)"); statusHint(false);
+    window->resize(800,600); QApplication::processEvents(); statusHint(false);
+    record("Select hint fits 800-pixel window");
+    key(Qt::Key_P,"P at 800 pixels"); statusHint(false);
+    penClick({100,100}); penClick({220,100}); penClick({220,200}); statusHint(true);
+    record("Pen closure hint fits 800-pixel window");
+}
 void run() {
     try {
         for(auto *widget : QApplication::topLevelWidgets()) {
@@ -296,8 +444,8 @@ void run() {
         require(window && window->isVisible(),"production window not ready");
         canvas=qobject_cast<fontu::Canvas *>(window->centralWidget());
         require(canvas && canvas->document().shapes().empty(),"doctor: unexpected canvas");
-        require(window->findChild<QToolBar *>() && window->findChild<QToolBar *>()->windowTitle()=="Shape tools" && window->menuBar()->actions().size()==1 && window->menuBar()->actions().at(0)->text()=="Snap","doctor: production controls missing");
-        record("Doctor passed: fresh production window, toolbar, Snap menu, empty document");
+        require(window->findChild<QToolBar *>() && window->findChild<QToolBar *>()->windowTitle()=="Shape tools" && window->findChild<QToolBar *>()->findChild<QAction *>("snapToGrid") && window->findChild<QToolBar *>()->findChild<QAction *>("snapToGeometry") && window->findChildren<QMenuBar *>().isEmpty(),"doctor: production controls missing");
+        record("Doctor passed: fresh production window, toolbar, Snap controls, empty document");
         if(feature=="drawing") {
             toolbar("Rectangle (R)"); drag({100,100},{220,190});
             require(canvas->document().shapes().size()==1 && bounds(0)==QRectF(100,100,120,90),"rectangle mismatch");
@@ -309,6 +457,10 @@ void run() {
             QTest::mousePress(canvas,Qt::LeftButton,Qt::NoModifier,{500,250});move({600,350},Qt::LeftButton);record("Unfinished draw preview");
             key(Qt::Key_Escape,"Escape");QTest::mouseRelease(canvas,Qt::LeftButton,Qt::NoModifier,{600,350});
             require(canvas->document().shapes().size()==2,"cancelled draw committed");
+        } else if(feature=="status") {
+            status();
+        } else if(feature=="history") {
+            history();
         } else if(feature=="editing") {
             toolbar("Rectangle (R)");drag({100,100},{220,200});
             toolbar("Select (V)");drag({150,150},{180,170});require(bounds(0)==QRectF(130,120,120,100),"move mismatch");
@@ -328,6 +480,12 @@ void run() {
         } else if(feature=="pen") {
             pen();
         } else if(feature=="snapping") {
+            window->resize(800,600); QApplication::processEvents();
+            record("Snap toolbar at 800 by 600");
+            snap("snapToGrid"); snap("snapToGrid");
+            snap("snapToGeometry"); snap("snapToGeometry");
+            window->resize(1100,760); QApplication::processEvents();
+            record("Snap toolbar at 1100 by 760");
             snap("snapToGrid");require(canvas->gridSnapEnabled() && !canvas->geometrySnapEnabled(),"grid mode mismatch");
             snap("snapToGeometry");require(canvas->gridSnapEnabled() && canvas->geometrySnapEnabled(),"both modes mismatch");
             snap("snapToGrid");require(!canvas->gridSnapEnabled() && canvas->geometrySnapEnabled(),"geometry mode mismatch");

@@ -43,4 +43,4 @@ The [Pen recipe](pen.md) separately proves open-path stroke selection, movement,
 - A newly drawn shape is already selected. Switch to Select before moving or resizing.
 - Handles have fixed screen size. Use the rendered handle center after any zoom or pan.
 - Clicking an overlap selects the most recently drawn eligible shape.
-- There is no undo. Use only the helper's disposable document.
+- Undo and Redo restore completed edits. See the [history recipe](history.md). Use only the helper's disposable document.
