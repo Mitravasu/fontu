@@ -49,13 +49,18 @@ public:
     std::optional<ShapeId> addPath(const QPainterPath &path, ShapePaint paint = ShapePaint::Filled);
     bool replacePath(ShapeId id, const QPainterPath &path);
     void select(std::optional<ShapeId> id);
-    std::optional<ShapeId> selection() const { return selected_; }
+    void toggleSelection(ShapeId id);
+    void selectAll();
+    bool isSelected(ShapeId id) const;
+    const std::vector<ShapeId> &selectedIds() const { return selected_; }
+    std::optional<ShapeId> selection() const { return selected_.empty() ? std::nullopt : std::optional<ShapeId>(selected_.back()); }
+    bool replaceShapes(const std::vector<ShapeId> &sources, const std::vector<QPainterPath> &paths);
     bool deleteSelection();
     std::optional<ShapeId> hitTest(const QPointF &point, double tolerance) const;
 private:
     GlyphDocumentDefinition definition_;
     std::vector<Shape> shapes_;
-    std::optional<ShapeId> selected_;
+    std::vector<ShapeId> selected_;
     ShapeId nextId_ = 1;
 };
 }

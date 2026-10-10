@@ -69,7 +69,8 @@ void ProjectWindow::setupEditorChrome() {
     auto *group = new QActionGroup(this);
     const std::pair<QString, fontu::Tool> tools[] = {
         {"Select (V)", fontu::Tool::Select}, {"Rectangle (R)", fontu::Tool::Rectangle},
-        {"Ellipse (E)", fontu::Tool::Ellipse}, {"Pen (P)", fontu::Tool::Pen}};
+        {"Ellipse (E)", fontu::Tool::Ellipse}, {"Pen (P)", fontu::Tool::Pen},
+        {"Shape Builder (B)", fontu::Tool::ShapeBuilder}};
     for (const auto &entry : tools) {
         const auto tool = entry.second;
         auto *action = toolbar->addAction(entry.first);

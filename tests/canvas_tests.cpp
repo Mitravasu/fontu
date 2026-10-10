@@ -53,6 +53,78 @@ void prepare(Canvas &canvas) {
 class CanvasTests : public QObject {
     Q_OBJECT
 private slots:
+    void multiSelectedMoveAndCancellation() {
+        Canvas canvas;
+        prepare(canvas);
+        QTest::keyClick(&canvas, Qt::Key_R);
+        drag(canvas, {100, 100}, {200, 200});
+        drag(canvas, {250, 100}, {350, 200});
+        QTest::keyClick(&canvas, Qt::Key_V);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {150, 150});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::ShiftModifier, {300, 150});
+        const auto original = canvas.document().shapes();
+        drag(canvas, {150, 150}, {170, 180});
+        QCOMPARE(canvas.viewport().transform().mapRect(canvas.document().shapes()[0].path.boundingRect()), QRectF(120, 130, 100, 100));
+        QCOMPARE(canvas.viewport().transform().mapRect(canvas.document().shapes()[1].path.boundingRect()), QRectF(270, 130, 100, 100));
+        QCOMPARE(canvas.document().selectedIds().size(), std::size_t(2));
+        canvas.undo();
+        QCOMPARE(canvas.document().shapes()[0].path, original[0].path);
+        QCOMPARE(canvas.document().shapes()[1].path, original[1].path);
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::NoModifier, {300, 150});
+        movePointer(canvas, {320, 180});
+        QTest::keyClick(&canvas, Qt::Key_Escape);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::NoModifier, {320, 180});
+        QCOMPARE(canvas.document().shapes()[0].path, original[0].path);
+        QCOMPARE(canvas.document().shapes()[1].path, original[1].path);
+        QVERIFY(canvas.canRedo());
+    }
+    void builderEventsMergeSubtractUndoAndCancel() {
+        Canvas canvas;
+        prepare(canvas);
+        QTest::keyClick(&canvas, Qt::Key_R);
+        drag(canvas, {100, 100}, {200, 200});
+        drag(canvas, {150, 100}, {250, 200});
+        const auto original = canvas.document().shapes();
+        QTest::keyClick(&canvas, Qt::Key_V);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {125, 150});
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::ShiftModifier, {225, 150});
+        QCOMPARE(canvas.document().selectedIds().size(), std::size_t(2));
+        QTest::keyClick(&canvas, Qt::Key_B);
+        QCOMPARE(canvas.tool(), Tool::ShapeBuilder);
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::NoModifier, {125, 150});
+        movePointer(canvas, {225, 150});
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(2));
+        QCOMPARE(canvas.projectSnapshot().glyphs[0].shapes[0].path, original[0].path);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::NoModifier, {225, 150});
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(1));
+        QCOMPARE(canvas.viewport().transform().mapRect(canvas.document().shapes()[0].path.boundingRect()), QRectF(100, 100, 150, 100));
+        canvas.undo();
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(2));
+        QCOMPARE(canvas.document().shapes()[0].path, original[0].path);
+        QCOMPARE(canvas.document().shapes()[1].path, original[1].path);
+        QCOMPARE(canvas.document().selectedIds().size(), std::size_t(2));
+        canvas.redo();
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(1));
+        canvas.undo();
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::AltModifier, {175, 150});
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(2));
+        const auto intersection = canvas.viewport().toDocument({175, 150});
+        for (const auto &shape : canvas.document().shapes()) QVERIFY(!shape.path.contains(intersection));
+        canvas.undo();
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::NoModifier, {125, 150});
+        movePointer(canvas, {225, 150});
+        QTest::keyClick(&canvas, Qt::Key_Escape);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::NoModifier, {225, 150});
+        QCOMPARE(canvas.document().shapes()[0].path, original[0].path);
+        QCOMPARE(canvas.document().shapes()[1].path, original[1].path);
+        QVERIFY(canvas.canRedo());
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::NoModifier, {125, 150});
+        QVERIFY(canvas.setActiveGlyph({2}));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::NoModifier, {225, 150});
+        QVERIFY(canvas.document().shapes().empty());
+        QVERIFY(canvas.setActiveGlyph({1}));
+        QCOMPARE(canvas.document().shapes()[0].path, original[0].path);
+    }
     void glyphDrawingsHistoryAndSelectionStayIndependent() {
         Canvas canvas({{{42}, "zero"}, {{900}, "alternate one"}});
         prepare(canvas);

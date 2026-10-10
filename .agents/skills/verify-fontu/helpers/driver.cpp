@@ -91,9 +91,9 @@ void record(const QString &action) {
 }
 void toolState(fontu::Tool expected) {
     require(canvas->tool()==expected,"canvas tool did not change");
-    const QString names[]={"Select (V)","Rectangle (R)","Ellipse (E)","Pen (P)"};
+    const QString names[]={"Select (V)","Rectangle (R)","Ellipse (E)","Pen (P)","Shape Builder (B)"};
     for(auto *action : window->findChild<QToolBar *>()->actions()) {
-        for(int i=0;i<4;++i) if(action->text()==names[i])
+        for(int i=0;i<5;++i) if(action->text()==names[i])
             require(action->isChecked()==(i==int(expected)),"toolbar tool state mismatch");
     }
 }
@@ -110,6 +110,7 @@ void toolbar(const QString &text) {
     if(text=="Rectangle (R)") toolState(fontu::Tool::Rectangle);
     if(text=="Ellipse (E)") toolState(fontu::Tool::Ellipse);
     if(text=="Pen (P)") toolState(fontu::Tool::Pen);
+    if(text=="Shape Builder (B)") toolState(fontu::Tool::ShapeBuilder);
     record("Toolbar click: " + text);
 }
 void key(Qt::Key key, const QString &label) {
@@ -118,6 +119,7 @@ void key(Qt::Key key, const QString &label) {
     if(key==Qt::Key_R) toolState(fontu::Tool::Rectangle);
     if(key==Qt::Key_E) toolState(fontu::Tool::Ellipse);
     if(key==Qt::Key_P) toolState(fontu::Tool::Pen);
+    if(key==Qt::Key_B) toolState(fontu::Tool::ShapeBuilder);
     record("Canvas key: " + label);
 }
 void move(QPoint point, Qt::MouseButtons buttons) {
@@ -509,6 +511,88 @@ void fileMenu(const QString &name) {
     QTest::mouseClick(menu, Qt::LeftButton, Qt::NoModifier, menu->actionGeometry(action).center());
     QApplication::processEvents();
 }
+void shapeBuilder() {
+    const auto initial = output + "/initial.fontu";
+    require(fontu::writeProject(initial, canvas->projectSnapshot()).isEmpty(), "builder fixture write failed");
+    fileChoice(initial); fileShortcut(QKeySequence::Open);
+    legacyView();
+    toolbar("Rectangle (R)"); drag({100,100},{200,200}); drag({150,100},{250,200});
+    const auto originals = canvas->document().shapes();
+    toolbar("Select (V)");
+    QTest::mouseClick(canvas,Qt::LeftButton,Qt::NoModifier,{125,150});
+    QTest::mouseClick(canvas,Qt::LeftButton,Qt::ShiftModifier,{225,150});
+    require(canvas->document().selectedIds().size()==2,"Shift did not select both sources");
+    record("Shift-click selects both overlapping rectangles");
+    toolbar("Shape Builder (B)");
+    move({175,150},Qt::NoButton);
+    require(canvas->document().shapes()[0].path==originals[0].path,"builder hover changed geometry");
+    const auto hoverImage=canvas->grab().toImage();
+    const auto hoverColor=hoverImage.pixelColor(175,150);
+    require(hoverColor.blue()>hoverColor.red()+20,"builder hover fill missing");
+    record("Builder hover highlights only the overlap without editing");
+    QTest::mouseClick(canvas,Qt::LeftButton,Qt::NoModifier,{175,150});
+    require(canvas->document().shapes().size()==3,"region extraction lost side regions");
+    require(bounds(2)==QRectF(150,100,50,100),"extracted overlap bounds wrong");
+    record("Click extracts overlap and retains both editable side regions");
+    toolbar("Undo");
+    require(canvas->document().shapes()[0].path==originals[0].path && canvas->document().shapes()[1].path==originals[1].path,"one Undo did not restore sources");
+    QTest::mousePress(canvas,Qt::LeftButton,Qt::NoModifier,{125,150});
+    move({225,150},Qt::LeftButton);
+    require(canvas->document().shapes().size()==2,"held merge edited geometry");
+    record("Sparse drag previews all three crossed regions before commit");
+    QTest::mouseRelease(canvas,Qt::LeftButton,Qt::NoModifier,{225,150});
+    require(canvas->document().shapes().size()==1 && bounds(0)==QRectF(100,100,150,100),"drag did not merge all crossed regions");
+    record("Release produces one merged editable path");
+    toolbar("Undo"); toolbar("Redo");
+    require(canvas->document().shapes().size()==1,"Redo did not restore merge");
+    toolbar("Select (V)"); drag({175,150},{205,170});
+    require(bounds(0)==QRectF(130,120,150,100),"merged path cannot move with Select");
+    toolbar("Undo"); toolbar("Undo");
+    key(Qt::Key_B,"B activates Builder");
+    QTest::mouseClick(canvas,Qt::LeftButton,Qt::AltModifier,{175,150});
+    require(canvas->document().shapes().size()==2,"Alt subtraction removed side regions");
+    const auto overlapPoint=canvas->viewport().toDocument({175,150});
+    for(const auto &shape:canvas->document().shapes()) require(!shape.path.contains(overlapPoint),"Alt left overlap covered");
+    record("Alt-click removes overlap from every contributing source");
+    toolbar("Undo");
+    QTest::mousePress(canvas,Qt::LeftButton,Qt::NoModifier,{125,150});
+    move({225,150},Qt::LeftButton); key(Qt::Key_Escape,"Escape cancels held Builder gesture");
+    QTest::mouseRelease(canvas,Qt::LeftButton,Qt::NoModifier,{225,150});
+    require(canvas->document().shapes()[0].path==originals[0].path,"Escape changed source");
+    drag({125,150},{225,150});
+    const auto merged=canvas->document().shapes()[0].path;
+    const auto saved=output+"/builder.fontu";
+    fileChoice(saved); fileMenu("saveProjectAs");
+    require(!window->isWindowModified(),"Builder Save As stayed dirty");
+    toolbar("Select (V)"); key(Qt::Key_Delete,"Delete merged path");
+    prompt(QMessageBox::Discard); fileChoice(saved); fileMenu("openProject");
+    require(canvas->document().shapes().size()==1 && canvas->document().shapes()[0].path==merged,"Builder saved path did not reopen exactly");
+    record("File Save As and Open preserve exact generated path elements");
+    const auto center=canvas->viewport().toScreen(merged.boundingRect().center()).toPoint();
+    drag(center,center+QPoint(20,10));
+    require(canvas->document().shapes()[0].path!=merged,"reopened Builder result cannot move");
+    window->resize(1100,760); QApplication::processEvents();
+    key(Qt::Key_B,"Builder at default window size");
+    record("Builder and Snap controls at default window size");
+    toolbar("Ellipse (E)"); drag({420,250},{600,430}); drag({520,250},{700,430});
+    toolbar("Select (V)");
+    QTest::keyClick(canvas,Qt::Key_A,QKeySequence::keyBindings(QKeySequence::SelectAll).front()[0].keyboardModifiers());
+    require(canvas->document().selectedIds().size()==3,"Select All did not include curved sources");
+    toolbar("Shape Builder (B)");
+    const auto retained=canvas->document().shapes()[0].path;
+    drag({450,340},{670,340});
+    require(canvas->document().shapes().size()==2,"curved merge changed unrelated source");
+    require(canvas->document().shapes()[0].path==retained,"curved merge changed retained source elements");
+    require(fontu::ShapeBuilder(canvas->document()).regions().size()==2,"curved merged outline still has internal seams");
+    record("Overlapping ellipses merge with a continuous outline while unrelated path remains exact");
+    fileMenu("saveProject");
+    const auto curved=canvas->document().shapes()[1].path;
+    fileChoice(saved); fileMenu("openProject");
+    require(canvas->document().shapes()[1].path==curved,"curved Builder output failed project roundtrip");
+    key(Qt::Key_B,"Builder after reopening curved result");
+    record("Saved curved Builder result preserves exact generated line elements");
+
+}
 void persistence() {
     auto *projectWindow = qobject_cast<fontu::ProjectWindow *>(window);
     require(projectWindow, "production project window missing");
@@ -726,7 +810,9 @@ void run() {
             QApplication::processEvents();
             legacyView();
         }
-        if(feature=="creation") {
+        if(feature=="shape-builder") {
+            shapeBuilder();
+        } else if(feature=="creation") {
             creation();
         } else if(feature=="persistence") {
             persistence();

@@ -19,7 +19,7 @@ std::array<QPointF, 9> boundsSnapPoints(const QRectF &r) {
 }
 std::optional<SnapResult> snapPoint(const QPointF &point, const Document &document,
                                   const Viewport &viewport, SnapOptions options,
-                                  std::optional<ShapeId> excluded, SnapAxes axes) {
+                                  std::optional<ShapeId> excluded, SnapAxes axes, const std::vector<ShapeId> &excludedIds) {
     std::optional<SnapResult> best;
     auto consider = [&](QPointF target) {
         if (axes == SnapAxes::Horizontal && std::abs(target.y() - point.y()) > 1e-7) return;
@@ -43,7 +43,7 @@ std::optional<SnapResult> snapPoint(const QPointF &point, const Document &docume
                 consider(viewport.toScreen({document.definition().constrainPoint(docPoint).x(), guide.position}));
         consider(viewport.toScreen({0, document.definition().constrainPoint(docPoint).y()}));
         for (const auto &shape : document.shapes()) {
-            if (excluded == shape.id) continue;
+            if (excluded == shape.id || std::find(excludedIds.begin(), excludedIds.end(), shape.id) != excludedIds.end()) continue;
             const auto path = viewport.transform().map(shape.path);
             if (!path.boundingRect().adjusted(-snapTolerance, -snapTolerance,
                                              snapTolerance, snapTolerance).contains(point)) continue;

@@ -70,6 +70,7 @@ bool Canvas::setActiveGlyph(GlyphId id) {
     gestureButton_ = Qt::NoButton;
     resizeHandle_ = -1;
     activeGlyphIndex_ = index;
+    refreshBuilder();
     setCursor(tool_ == Tool::Select ? Qt::ArrowCursor : Qt::CrossCursor);
     emit activeGlyphChanged();
     emit historyChanged();
@@ -102,6 +103,7 @@ void Canvas::restoreProject(ProjectSnapshot project) {
     cancelPendingInput();
     glyphs_ = std::move(replacement);
     activeGlyphIndex_ = activeIndex;
+    refreshBuilder();
     resetView();
     emit glyphsChanged();
     emit activeGlyphChanged();
@@ -109,12 +111,19 @@ void Canvas::restoreProject(ProjectSnapshot project) {
     update();
 }
 QString Canvas::controlsHint() const {
+    if (tool_ == Tool::ShapeBuilder) {
+        if (!builder_ || builder_->geometry.regions().empty())
+            return QStringLiteral("Select closed fills with Shift+click or Select All, then B • Open strokes ignored");
+        return QStringLiteral("Click a region • Drag merges • Alt removes • Esc cancels • Space+drag pans");
+    }
     if (tool_ == Tool::Pen) {
         return (penDraft_.size() >= 3
             ? QStringLiteral("Click first anchor to fill • Enter finishes")
             : QStringLiteral("Click anchors • Enter finishes"))
             + QStringLiteral(" • Drag to curve • Esc cancels • Wheel zooms • Space+drag pans");
     }
+    if (tool_ == Tool::Select)
+        return QStringLiteral("Shift+click selects more • Drag moves • Handles resize • Delete selection • Wheel zooms • Space+drag pans");
     return QStringLiteral("Drag draws or moves • Handles resize • Delete selection • Esc cancels • Wheel zooms • Space+drag pans");
 }
 void Canvas::recordEdit(Document before) {
@@ -134,6 +143,7 @@ void Canvas::undo() {
     cancelGesture();
     if (!canUndo()) return;
     activeGlyph().document = activeGlyph().history[--activeGlyph().historyPosition].before;
+    refreshBuilder();
     updateHoverSnap();
     if (hoverPosition_) updateCursor(*hoverPosition_);
     emit historyChanged();
@@ -144,6 +154,7 @@ void Canvas::redo() {
     cancelGesture();
     if (!canRedo()) return;
     activeGlyph().document = activeGlyph().history[activeGlyph().historyPosition++].after;
+    refreshBuilder();
     updateHoverSnap();
     if (hoverPosition_) updateCursor(*hoverPosition_);
     emit historyChanged();
@@ -167,9 +178,24 @@ bool Canvas::stepPenHistory(bool forward) {
 void Canvas::setTool(Tool tool) {
     cancelGesture();
     tool_ = tool;
+    refreshBuilder();
     setCursor(tool == Tool::Select ? Qt::ArrowCursor : Qt::CrossCursor);
     emit toolChanged(tool);
     update();
+}
+void Canvas::refreshBuilder() {
+    builder_.reset();
+    if (tool_ == Tool::ShapeBuilder) builder_.emplace(document());
+    emit controlsHintChanged(controlsHint());
+}
+void Canvas::extendBuilder(const QPointF &point) {
+    if (!builder_ || !builder_->gesture) return;
+    auto &gesture = *builder_->gesture;
+    for (const auto index : builder_->geometry.crossed(gesture.last, point))
+        if (std::find(gesture.touched.begin(), gesture.touched.end(), index) == gesture.touched.end())
+            gesture.touched.push_back(index);
+    gesture.last = point;
+    builder_->hovered = builder_->geometry.hit(point);
 }
 void Canvas::setGridSnapEnabled(bool enabled) {
     if (snapOptions_.grid == enabled) return;
@@ -219,7 +245,7 @@ std::array<QPointF, 8> Canvas::handles(const QRectF &r) const {
             QPointF(r.left(), r.center().y())};
 }
 int Canvas::handleAt(const QPointF &position) const {
-    if (!activeGlyph().document.selection()) return -1;
+    if (activeGlyph().document.selectedIds().size() != 1 || tool_ == Tool::ShapeBuilder) return -1;
     const auto bounds = selectionScreenBounds();
     auto points = handles(bounds);
     for (int i = 0; i < 8; ++i) {
@@ -277,11 +303,23 @@ void Canvas::paintEvent(QPaintEvent *) {
     painter.save();
     painter.setTransform(viewport_.transform());
     for (const auto &shape : activeGlyph().document.shapes()) {
-        const bool selected = activeGlyph().document.selection() == shape.id;
+        const bool selected = activeGlyph().document.isSelected(shape.id);
         painter.setPen(cosmeticPen(selected ? QColor("#2563eb") : QColor("#334155"), 1.5));
         painter.setBrush(shape.paint == ShapePaint::Stroke ? QBrush(Qt::NoBrush)
                          : QBrush(selected ? QColor(96, 165, 250, 80) : QColor(100, 116, 139, 75)));
         painter.drawPath(shape.path);
+    }
+    if (builder_) {
+        painter.setPen(cosmeticPen(QColor("#2563eb"), 1));
+        painter.setBrush(Qt::NoBrush);
+        for (const auto &region : builder_->geometry.regions()) painter.drawPath(region.path);
+        const bool subtract = builder_->gesture && builder_->gesture->operation == BuilderOperation::Subtract;
+        painter.setBrush(subtract ? QColor(239, 68, 68, 125) : QColor(37, 99, 235, 110));
+        painter.setPen(cosmeticPen(subtract ? QColor("#dc2626") : QColor("#1d4ed8"), 2));
+        if (builder_->gesture) {
+            for (const auto index : builder_->gesture->touched)
+                painter.drawPath(builder_->geometry.regions()[index].path);
+        } else if (builder_->hovered) painter.drawPath(builder_->geometry.regions()[*builder_->hovered].path);
     }
     if (!preview_.isEmpty()) {
         auto pen = cosmeticPen(QColor("#2563eb"), 1.5);
@@ -326,7 +364,7 @@ void Canvas::paintEvent(QPaintEvent *) {
         painter.setBrush(closing ? QBrush(QColor(96, 165, 250, 80)) : QBrush(Qt::NoBrush));
         painter.drawEllipse(viewport_.toScreen(penDraft_.front().position), penCloseDistance, penCloseDistance);
     }
-    if (activeGlyph().document.selection()) {
+    if (tool_ != Tool::ShapeBuilder && activeGlyph().document.selectedIds().size() == 1) {
         painter.setPen(QPen(QColor("#2563eb"), 1));
         painter.setBrush(Qt::NoBrush);
         const auto bounds = selectionScreenBounds();
@@ -366,7 +404,15 @@ void Canvas::mousePressEvent(QMouseEvent *event) {
             update();
             return;
         }
-        if (tool_ == Tool::Pen) {
+        if (tool_ == Tool::ShapeBuilder) {
+            if (!builder_) refreshBuilder();
+            const auto operation = event->modifiers().testFlag(Qt::AltModifier)
+                ? BuilderOperation::Subtract : BuilderOperation::Combine;
+            builder_->gesture = BuilderGesture{operation, {}, startDocument_};
+            if (auto hit = builder_->geometry.hit(startDocument_)) builder_->gesture->touched.push_back(*hit);
+            gestureBefore_ = activeGlyph().document;
+            gesture_ = Gesture::Build;
+        } else if (tool_ == Tool::Pen) {
             if (canClosePen(position)) {
                 auto before = activeGlyph().document;
                 const auto id = activeGlyph().document.addPath(makePenPath(penDraft_, true), ShapePaint::Filled);
@@ -397,12 +443,19 @@ void Canvas::mousePressEvent(QMouseEvent *event) {
             }
             preview_ = {};
         } else {
+            if (event->modifiers().testFlag(Qt::ShiftModifier)) {
+                if (auto hit = activeGlyph().document.hitTest(startDocument_, hitTolerance / viewport_.zoom()))
+                    activeGlyph().document.toggleSelection(*hit);
+                update();
+                return;
+            }
             resizeHandle_ = handleAt(position);
             if (resizeHandle_ >= 0) {
                 editingId_ = activeGlyph().document.selection();
                 gesture_ = Gesture::Resize;
             } else {
-                activeGlyph().document.select(activeGlyph().document.hitTest(startDocument_, hitTolerance / viewport_.zoom()));
+                const auto hit = activeGlyph().document.hitTest(startDocument_, hitTolerance / viewport_.zoom());
+                if (!hit || !activeGlyph().document.isSelected(*hit)) activeGlyph().document.select(hit);
                 editingId_ = activeGlyph().document.selection();
                 if (editingId_) gesture_ = Gesture::Move;
             }
@@ -417,7 +470,9 @@ void Canvas::mousePressEvent(QMouseEvent *event) {
 void Canvas::updateGesture(const QPointF &position) {
     auto documentPoint = viewport_.toDocument(position);
     snapMarker_.reset();
-    if (gesture_ == Gesture::Pan) {
+    if (gesture_ == Gesture::Build) {
+        extendBuilder(documentPoint);
+    } else if (gesture_ == Gesture::Pan) {
         viewport_.pan(position - lastScreen_);
     } else if (gesture_ == Gesture::PenAnchor) {
         penDraft_.back().tangent = {};
@@ -443,7 +498,11 @@ void Canvas::updateGesture(const QPointF &position) {
                              QRectF(startDocument_, documentPoint));
     } else if (gesture_ == Gesture::Move && editingId_) {
         auto delta = documentPoint - startDocument_;
-        const auto rawBounds = viewport_.transform().mapRect(translated(originalPath_, delta).boundingRect());
+        auto sourceBounds = originalPath_.boundingRect();
+        if (gestureBefore_ && activeGlyph().document.selectedIds().size() > 1)
+            for (const auto id : activeGlyph().document.selectedIds())
+                sourceBounds = sourceBounds.united(gestureBefore_->find(id)->path.boundingRect());
+        const auto rawBounds = viewport_.transform().mapRect(sourceBounds.translated(delta));
         if (position != startScreen_) {
             if (auto snap = moveSnap(rawBounds, *editingId_)) {
                 const auto correction = snap->second;
@@ -451,9 +510,12 @@ void Canvas::updateGesture(const QPointF &position) {
                 snapMarker_ = snap->first.point;
             }
         }
-        const auto constrained = activeGlyph().document.definition().constrainTranslation(originalPath_.boundingRect(), delta);
+        const auto constrained = activeGlyph().document.definition().constrainTranslation(sourceBounds, delta);
         if (constrained != delta) snapMarker_.reset();
-        activeGlyph().document.replacePath(*editingId_, translated(originalPath_, constrained));
+        if (gestureBefore_ && activeGlyph().document.selectedIds().size() > 1) {
+            for (const auto id : activeGlyph().document.selectedIds())
+                activeGlyph().document.replacePath(id, translated(gestureBefore_->find(id)->path, constrained));
+        } else activeGlyph().document.replacePath(*editingId_, translated(originalPath_, constrained));
     } else if (gesture_ == Gesture::Resize && editingId_) {
         auto bounds = viewport_.transform().mapRect(originalPath_.boundingRect());
         auto handlePosition = handles(bounds)[resizeHandle_] + position - startScreen_;
@@ -492,7 +554,7 @@ void Canvas::updateGesture(const QPointF &position) {
 std::optional<std::pair<SnapResult, QPointF>> Canvas::moveSnap(const QRectF &bounds, ShapeId excluded) const {
     std::optional<std::pair<SnapResult, QPointF>> best;
     for (const auto &point : boundsSnapPoints(bounds)) {
-        if (auto snap = snapPoint(point, activeGlyph().document, viewport_, snapOptions_, excluded)) {
+        if (auto snap = snapPoint(point, activeGlyph().document, viewport_, snapOptions_, excluded, SnapAxes::Both, activeGlyph().document.selectedIds())) {
             if (!best || snap->distance < best->first.distance)
                 best = std::make_pair(*snap, snap->point - point);
         }
@@ -506,6 +568,12 @@ bool Canvas::canClosePen(const QPointF &position) const {
 }
 void Canvas::updateHoverSnap() {
     snapMarker_.reset();
+    if (tool_ == Tool::ShapeBuilder) {
+        if (builder_) builder_->hovered = hoverPosition_ && !spaceHeld_ && rect().contains(hoverPosition_->toPoint())
+            ? builder_->geometry.hit(viewport_.toDocument(*hoverPosition_)) : std::nullopt;
+        update();
+        return;
+    }
     if (hoverPosition_ && rect().contains(hoverPosition_->toPoint()) && gesture_ == Gesture::Idle && !spaceHeld_) {
         const auto position = *hoverPosition_;
         if (tool_ != Tool::Select && !activeGlyph().document.definition().bounds.contains(viewport_.toDocument(position))) {
@@ -552,7 +620,10 @@ void Canvas::mouseMoveEvent(QMouseEvent *event) {
 void Canvas::mouseReleaseEvent(QMouseEvent *event) {
     if (gesture_ == Gesture::Idle || event->button() != gestureButton_) return;
     updateGesture(event->position());
-    if (gesture_ == Gesture::Draw) {
+    if (gesture_ == Gesture::Build && builder_ && builder_->gesture) {
+        const auto &build = *builder_->gesture;
+        builder_->geometry.apply(activeGlyph().document, build.touched, build.operation);
+    } else if (gesture_ == Gesture::Draw) {
         const auto screenBounds = viewport_.transform().mapRect(preview_.boundingRect());
         if (screenBounds.width() >= 3 && screenBounds.height() >= 3)
             activeGlyph().document.select(activeGlyph().document.addPath(preview_));
@@ -561,6 +632,7 @@ void Canvas::mouseReleaseEvent(QMouseEvent *event) {
     gestureBefore_.reset();
     if (before) recordEdit(std::move(*before));
     gesture_ = Gesture::Idle;
+    refreshBuilder();
     editingId_.reset();
     originalPath_ = preview_ = {};
     hoverPosition_ = event->position();
@@ -570,8 +642,9 @@ void Canvas::mouseReleaseEvent(QMouseEvent *event) {
 }
 void Canvas::cancelGesture() {
     const bool hadPenHistory = hasPenHistory();
-    if (editingId_ && (gesture_ == Gesture::Move || gesture_ == Gesture::Resize))
-        activeGlyph().document.replacePath(*editingId_, originalPath_);
+    if (builder_) { builder_->gesture.reset(); builder_->hovered.reset(); }
+    if (gestureBefore_ && (gesture_ == Gesture::Move || gesture_ == Gesture::Resize))
+        activeGlyph().document = *gestureBefore_;
     gestureBefore_.reset();
     gesture_ = Gesture::Idle;
     editingId_.reset();
@@ -599,6 +672,11 @@ void Canvas::keyPressEvent(QKeyEvent *event) {
         undo();
     } else if (event->matches(QKeySequence::Redo)) {
         redo();
+    } else if (event->matches(QKeySequence::SelectAll)) {
+        cancelGesture();
+        activeGlyph().document.selectAll();
+        refreshBuilder();
+        update();
     } else if (event->key() == Qt::Key_Space) {
         spaceHeld_ = true;
         snapMarker_.reset();
@@ -607,6 +685,7 @@ void Canvas::keyPressEvent(QKeyEvent *event) {
     } else if (event->key() == Qt::Key_Escape) {
         if (gesture_ == Gesture::Idle && !hasPenHistory()) { activeGlyph().document.select({}); snapMarker_.reset(); }
         else cancelGesture();
+        refreshBuilder();
         update();
     } else if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) && tool_ == Tool::Pen) {
         if (gesture_ == Gesture::Idle && penDraft_.size() >= 2) {
@@ -624,6 +703,7 @@ void Canvas::keyPressEvent(QKeyEvent *event) {
         cancelGesture();
         auto before = activeGlyph().document;
         activeGlyph().document.deleteSelection();
+        refreshBuilder();
         recordEdit(std::move(before));
         update();
     } else if (event->modifiers() == Qt::NoModifier) {
@@ -631,6 +711,7 @@ void Canvas::keyPressEvent(QKeyEvent *event) {
         else if (event->key() == Qt::Key_R) setTool(Tool::Rectangle);
         else if (event->key() == Qt::Key_E) setTool(Tool::Ellipse);
         else if (event->key() == Qt::Key_P) setTool(Tool::Pen);
+        else if (event->key() == Qt::Key_B) setTool(Tool::ShapeBuilder);
         else if (event->key() == Qt::Key_0) resetView();
         else QWidget::keyPressEvent(event);
     } else QWidget::keyPressEvent(event);
@@ -648,6 +729,7 @@ void Canvas::keyReleaseEvent(QKeyEvent *event) {
 void Canvas::leaveEvent(QEvent *event) {
     hoverPosition_.reset();
     snapMarker_.reset();
+    if (builder_) builder_->hovered.reset();
     update();
     QWidget::leaveEvent(event);
 }

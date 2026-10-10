@@ -113,14 +113,55 @@ bool Document::replacePath(ShapeId id, const QPainterPath &path) {
     return false;
 }
 void Document::select(std::optional<ShapeId> id) {
-    selected_ = id && find(*id) ? id : std::nullopt;
+    selected_.clear();
+    if (id && find(*id)) selected_.push_back(*id);
+}
+bool Document::isSelected(ShapeId id) const {
+    return std::find(selected_.begin(), selected_.end(), id) != selected_.end();
+}
+void Document::toggleSelection(ShapeId id) {
+    if (!find(id)) return;
+    const auto it = std::find(selected_.begin(), selected_.end(), id);
+    if (it == selected_.end()) selected_.push_back(id);
+    else selected_.erase(it);
+}
+void Document::selectAll() {
+    selected_.clear();
+    for (const auto &shape : shapes_) selected_.push_back(shape.id);
 }
 bool Document::deleteSelection() {
-    if (!selected_) return false;
-    const auto id = *selected_;
+    if (selected_.empty()) return false;
     shapes_.erase(std::remove_if(shapes_.begin(), shapes_.end(),
-                   [id](const Shape &shape) { return shape.id == id; }), shapes_.end());
-    selected_.reset();
+                   [this](const Shape &shape) { return isSelected(shape.id); }), shapes_.end());
+    selected_.clear();
+    return true;
+}
+bool Document::replaceShapes(const std::vector<ShapeId> &sources, const std::vector<QPainterPath> &paths) {
+    if (sources.empty()) return false;
+    for (const auto id : sources) if (!find(id)) return false;
+    for (const auto &path : paths)
+        if (!validPath(path) || !withinBounds(path, definition_.bounds)) return false;
+    auto candidate = *this;
+    const auto consumed = [&](ShapeId id) {
+        return std::find(sources.begin(), sources.end(), id) != sources.end();
+    };
+    auto insertion = std::find_if(candidate.shapes_.begin(), candidate.shapes_.end(),
+                                [&](const Shape &shape) { return consumed(shape.id); });
+    const auto index = std::size_t(insertion - candidate.shapes_.begin());
+    candidate.shapes_.erase(std::remove_if(candidate.shapes_.begin(), candidate.shapes_.end(),
+                              [&](const Shape &shape) { return consumed(shape.id); }), candidate.shapes_.end());
+    candidate.selected_.erase(std::remove_if(candidate.selected_.begin(), candidate.selected_.end(), consumed),
+                              candidate.selected_.end());
+    std::vector<Shape> added;
+    for (const auto &path : paths) {
+        const auto id = candidate.addPath(path);
+        if (!id) return false;
+        added.push_back(candidate.shapes_.back());
+        candidate.selected_.push_back(*id);
+        candidate.shapes_.pop_back();
+    }
+    candidate.shapes_.insert(candidate.shapes_.begin() + index, added.begin(), added.end());
+    *this = std::move(candidate);
     return true;
 }
 std::optional<ShapeId> Document::hitTest(const QPointF &point, double tolerance) const {

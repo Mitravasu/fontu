@@ -2,13 +2,14 @@
 #include "project.h"
 #include "viewport.h"
 #include "snapping.h"
+#include "shape_builder.h"
 #include <QWidget>
 #include <array>
 #include <utility>
 
 namespace fontu {
 std::vector<GlyphSeed> digitGlyphs();
-enum class Tool { Select, Rectangle, Ellipse, Pen };
+enum class Tool { Select, Rectangle, Ellipse, Pen, ShapeBuilder };
 class Canvas : public QWidget {
     Q_OBJECT
 public:
@@ -53,8 +54,22 @@ protected:
     void focusOutEvent(QFocusEvent *) override;
     void leaveEvent(QEvent *) override;
 private:
-    enum class Gesture { Idle, Draw, Move, Resize, Pan, PenAnchor };
+    enum class Gesture { Idle, Draw, Move, Resize, Pan, PenAnchor, Build };
     void cancelGesture();
+    void refreshBuilder();
+    void extendBuilder(const QPointF &point);
+    struct BuilderGesture {
+        BuilderOperation operation;
+        std::vector<std::size_t> touched;
+        QPointF last;
+    };
+    struct BuilderSession {
+        explicit BuilderSession(const Document &document) : geometry(document) {}
+        ShapeBuilder geometry;
+        std::optional<std::size_t> hovered;
+        std::optional<BuilderGesture> gesture;
+    };
+    std::optional<BuilderSession> builder_;
     bool hasPenHistory() const { return !penDraft_.empty() || !penRedo_.empty(); }
     bool stepPenHistory(bool forward);
     void recordEdit(Document before);

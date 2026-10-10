@@ -1,12 +1,130 @@
 #include "document.h"
+#include "shape_builder.h"
 #include "viewport.h"
 #include "snapping.h"
 #include <QtTest>
 #include <limits>
+#include <cmath>
 using namespace fontu;
 class CoreTests : public QObject {
     Q_OBJECT
 private slots:
+    void builderOverlapExtractSubtractAndAtomicAdmission() {
+        Document document;
+        const auto a = *document.addPath(makeShape(ShapeKind::Rectangle, {0, 0, 100, 100}));
+        const auto b = *document.addPath(makeShape(ShapeKind::Rectangle, {50, 0, 100, 100}));
+        document.selectAll();
+        ShapeBuilder builder(document);
+        QCOMPARE(builder.regions().size(), std::size_t(3));
+        const auto overlap = builder.hit({75, 50});
+        QVERIFY(overlap);
+        QVERIFY(builder.apply(document, {*overlap}, BuilderOperation::Combine));
+        QCOMPARE(document.shapes().size(), std::size_t(3));
+        QCOMPARE(document.find(*document.selection())->path.boundingRect(), QRectF(50, 0, 50, 100));
+        QVERIFY(document.shapes()[0].path.contains({25, 50}));
+        QVERIFY(document.shapes()[1].path.contains({125, 50}));
+        QVERIFY(!document.shapes()[0].path.contains({75, 50}));
+        QVERIFY(!document.shapes()[1].path.contains({75, 50}));
+        const auto saved = document.shapes();
+        QVERIFY(!document.replaceShapes({document.shapes()[0].id}, {makeShape(ShapeKind::Rectangle, {490, 0, 30, 30})}));
+        QCOMPARE(document.shapes()[0].path, saved[0].path);
+        Document subtraction;
+        subtraction.addPath(makeShape(ShapeKind::Rectangle, {0, 0, 100, 100}));
+        subtraction.addPath(makeShape(ShapeKind::Rectangle, {50, 0, 100, 100}));
+        subtraction.selectAll();
+        ShapeBuilder remove(subtraction);
+        QVERIFY(remove.apply(subtraction, {*remove.hit({75, 50})}, BuilderOperation::Subtract));
+        QCOMPARE(subtraction.shapes().size(), std::size_t(2));
+        for (const auto &shape : subtraction.shapes()) QVERIFY(!shape.path.contains({75, 50}));
+        QVERIFY(!subtraction.find(a));
+        QVERIFY(!subtraction.find(b));
+    }
+    void builderDisconnectedHolesWindingAndSweep() {
+        Document split;
+        split.addPath(makeShape(ShapeKind::Rectangle, {0, 0, 100, 100}));
+        split.addPath(makeShape(ShapeKind::Rectangle, {40, -10, 20, 120}));
+        split.selectAll();
+        ShapeBuilder builder(split);
+        QCOMPARE(builder.regions().size(), std::size_t(5));
+        QVERIFY(builder.hit({10, 50}) != builder.hit({90, 50}));
+        QCOMPARE(builder.crossed({10, 50}, {90, 50}).size(), std::size_t(3));
+        Document joined;
+        joined.addPath(makeShape(ShapeKind::Rectangle, {0, 0, 100, 100}));
+        joined.addPath(makeShape(ShapeKind::Rectangle, {50, 0, 100, 100}));
+        joined.selectAll();
+        ShapeBuilder combine(joined);
+        QVERIFY(combine.apply(joined, combine.crossed({25, 50}, {125, 50}), BuilderOperation::Combine));
+        QCOMPARE(joined.shapes().size(), std::size_t(1));
+        ShapeBuilder unified(joined);
+        QCOMPARE(unified.regions().size(), std::size_t(1));
+        QCOMPARE(unified.hit({25, 50}), unified.hit({125, 50}));
+
+        QCOMPARE(builder.crossed({-10, 0}, {110, 0}).size(), std::size_t(0));
+        QPainterPath ring;
+        ring.addRect({0, 0, 100, 100});
+        ring.addRect({25, 25, 50, 50});
+        Document holes;
+        holes.addPath(ring);
+        holes.selectAll();
+        ShapeBuilder donut(holes);
+        QCOMPARE(donut.regions().size(), std::size_t(1));
+        QVERIFY(donut.hit({10, 50}));
+        QVERIFY(!donut.hit({50, 50}));
+        QVERIFY(donut.crossed({30, 50}, {70, 50}).empty());
+        ring.setFillRule(Qt::WindingFill);
+        Document winding;
+        winding.addPath(ring);
+        winding.selectAll();
+        ShapeBuilder filled(winding);
+        QCOMPARE(filled.regions().size(), std::size_t(1));
+        QVERIFY(filled.hit({50, 50}));
+        Document duplicate;
+        duplicate.addPath(makeShape(ShapeKind::Rectangle, {0, 0, 100, 100}));
+        duplicate.addPath(makeShape(ShapeKind::Rectangle, {0, 0, 100, 100}));
+        duplicate.selectAll();
+        ShapeBuilder coincident(duplicate);
+        QCOMPARE(coincident.regions().size(), std::size_t(1));
+        QCOMPARE(coincident.regions()[0].sources.size(), std::size_t(2));
+    }
+    void builderEllipseBoundaryRemainsWithinSubpixelBandAtMaximumZoom() {
+        Document document;
+        document.addPath(makeShape(ShapeKind::Ellipse, {0, 0, 100, 100}));
+        document.selectAll();
+        ShapeBuilder builder(document);
+        QVERIFY(builder.apply(document, {*builder.hit({50, 50})}, BuilderOperation::Combine));
+        const auto &path = document.shapes()[0].path;
+        for (int angle = 0; angle < 720; ++angle) {
+            const auto radians = angle * 3.14159265358979323846 / 360;
+            const QPointF direction(std::cos(radians), std::sin(radians));
+            QVERIFY(path.contains(QPointF(50, 50) + direction * 49.9));
+            QVERIFY(!path.contains(QPointF(50, 50) + direction * 50.1));
+        }
+    }
+    void builderPinchesAndUntouchedSources() {
+        QPainterPath pinched;
+        pinched.moveTo(0, 0);
+        pinched.lineTo(100, 0); pinched.lineTo(100, 100); pinched.lineTo(0, 100);
+        pinched.lineTo(0, 0); pinched.lineTo(-100, 0); pinched.lineTo(-100, -100);
+        pinched.lineTo(0, -100); pinched.closeSubpath();
+        Document contact;
+        contact.addPath(pinched);
+        contact.selectAll();
+        ShapeBuilder pieces(contact);
+        QCOMPARE(pieces.regions().size(), std::size_t(2));
+        QVERIFY(pieces.hit({50, 50}) != pieces.hit({-50, -50}));
+        Document preserve;
+        const auto a = *preserve.addPath(makeShape(ShapeKind::Rectangle, {0, 0, 100, 100}));
+        const auto ellipse = makeShape(ShapeKind::Ellipse, {200, 0, 100, 100});
+        const auto b = *preserve.addPath(ellipse);
+        const auto stroke = *preserve.addPath(makePenPath({{{0, 200}, {}}, {{100, 200}, {}}}), ShapePaint::Stroke);
+        preserve.selectAll();
+        ShapeBuilder builder(preserve);
+        QCOMPARE(builder.regions().size(), std::size_t(2));
+        QVERIFY(builder.apply(preserve, {*builder.hit({50, 50})}, BuilderOperation::Subtract));
+        QVERIFY(!preserve.find(a));
+        QCOMPARE(preserve.find(b)->path, ellipse);
+        QCOMPARE(preserve.find(stroke)->paint, ShapePaint::Stroke);
+    }
     void boundedDocumentAdmission() {
         Document document;
         const auto id = document.addPath(makeShape(ShapeKind::Rectangle, {400, -250, 100, 100}));

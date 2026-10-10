@@ -10,6 +10,8 @@ Each feature entry lists all known user controls, then separates the scripted co
 
 ## Features
 
+- [Shape Builder](shape-builder.md) covers Shift selection, hover, region extraction, sparse drag merge, Alt subtraction, cancellation, Undo and Redo, editing, and project round trips.
+
 - [Project creation](creation.md) covers startup, Custom Unicode paste, guide enablement, nondefault settings and saved drawings, dirty replacement choices, retained histories, and dimension endpoint fits.
 
 - [Project persistence](persistence.md) covers File actions, standard shortcuts, temporary file dialogs, all-glyph vector round trips, dirty Undo and Redo, invalid Open, and canceled transitions.
