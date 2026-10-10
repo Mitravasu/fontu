@@ -1,12 +1,12 @@
 # Selecting and editing
 
-Users select one shape, move it by dragging its interior, resize it with handles, and delete it with the keyboard.
+Users select one shape, move it by dragging its filled interior or stroke, resize it with handles, and delete it with the keyboard.
 
 ## Sub-features
 
-- `edit-select` chooses Select through the toolbar or V and selects a shape by clicking its interior.
-- `edit-move` moves the selected shape with an interior drag.
-- `edit-resize` resizes from any of eight corner or edge handles.
+- `edit-select` chooses Select through the toolbar or V and selects a shape by clicking its filled interior or near its stroke.
+- `edit-move` moves the selected shape with a filled-interior or stroke drag.
+- `edit-resize` resizes from eight corner or edge handles for bounds with nonzero width and height. A horizontal path has only left/right handles; a vertical path has only top/bottom handles.
 - `edit-clear` clears selection with Escape or an empty-canvas click.
 - `edit-delete` deletes selection with Delete or Backspace.
 - `edit-cancel` rolls back an unfinished move or resize with Escape, tool change, or focus loss.
@@ -14,7 +14,7 @@ Users select one shape, move it by dragging its interior, resize it with handles
 ## How to get to it (user POV)
 
 - Click `Select (V)` or press V, then click a shape.
-- Drag a shape's interior or one of its eight square handles.
+- Drag a shape's filled interior or stroke to move it, or drag a visible square handle to resize it.
 - Press Escape while idle or click empty canvas to clear selection.
 - Press Delete or Backspace to remove the selection.
 - Press Escape during an edit, change tools, or move focus away to cancel an unfinished geometry edit.
@@ -35,6 +35,8 @@ Run `.agents/skills/verify-fontu/helpers/control-fontu editing --evidence /tmp/f
 - Require the final `PASS:` record, exit zero, visible state changes, and completed cleanup in `run.json`.
 
 For full editing coverage, add explicit production-window steps for the other seven handles, anchor crossing, off-center handles, overlapping-shape selection order, empty-canvas deselection, and each edit cancellation entry point. These checks are mapped but not implemented by this command. Existing tests are useful regression evidence only.
+
+The [Pen recipe](pen.md) separately proves open-path stroke selection, movement, and deletion, plus closed-path filled-interior selection. Its committed horizontal line shows the two endpoint handles. Endpoint resizing still needs a production-window recipe.
 
 ## Gotchas
 
