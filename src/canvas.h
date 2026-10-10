@@ -10,6 +10,7 @@
 namespace fontu {
 std::vector<GlyphSeed> digitGlyphs();
 enum class Tool { Select, Rectangle, Ellipse, Pen, ShapeBuilder };
+enum class RenderMode { XRay, Opaque };
 class Canvas : public QWidget {
     Q_OBJECT
 public:
@@ -24,6 +25,8 @@ public:
     void cancelPendingInput();
     const Viewport &viewport() const { return viewport_; }
     Tool tool() const { return tool_; }
+    RenderMode renderMode() const { return renderMode_; }
+    void setRenderMode(RenderMode mode);
     QString controlsHint() const;
     void setTool(Tool tool);
     void resetView();
@@ -39,6 +42,7 @@ signals:
     void activeGlyphChanged();
     void glyphsChanged();
     void toolChanged(Tool tool);
+    void renderModeChanged(RenderMode mode);
     void snapOptionsChanged();
     void historyChanged();
     void controlsHintChanged(const QString &hint);
@@ -98,6 +102,7 @@ private:
     std::optional<Document> gestureBefore_;
     Viewport viewport_;
     Tool tool_ = Tool::Select;
+    RenderMode renderMode_ = RenderMode::XRay;
     Gesture gesture_ = Gesture::Idle;
     bool spaceHeld_ = false;
     bool viewInitialized_ = false;

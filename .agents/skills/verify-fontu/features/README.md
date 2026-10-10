@@ -10,6 +10,8 @@ Each feature entry lists all known user controls, then separates the scripted co
 
 ## Features
 
+- [Opaque preview](opaque-preview.md) covers the default X-ray view, toolbar and View menu toggles, black overlap fills, holes, open strokes, and unchanged document state.
+
 - [Shape Builder](shape-builder.md) covers Shift selection, hover, region extraction, sparse drag merge, Alt subtraction, cancellation, Undo and Redo, editing, and project round trips.
 
 - [Project creation](creation.md) covers startup, Custom Unicode paste, guide enablement, nondefault settings and saved drawings, dirty replacement choices, retained histories, and dimension endpoint fits.
@@ -26,7 +28,7 @@ Each feature entry lists all known user controls, then separates the scripted co
 - [Bottom status hints](status.md) covers initial tool hints, Pen closure hints through vertex Undo and Redo, completion and cancellation, draft navigation, and readability at 1100 and 800 pixels.
 - [Selecting and editing](editing.md) covers Select toolbar/keyboard, move, one corner resize, deselection, Delete, and Backspace. It lists remaining handle and rollback checks.
 - [Navigating the canvas](navigation.md) covers wheel events, both pan controls, and both Reset view controls. Native trackpad delivery remains unverified.
-- [Snapping](snapping.md) covers the two Snap toolbar toggles, all four toggle combinations, pre-press drawing hover targets, and a geometry-snapped drawing start. Move and resize effects require additional recipes.
+- [Snapping](snapping.md) covers the two Snap toolbar toggles, all four toggle combinations, pre-press drawing hover targets, and a geometry-snapped drawing start. The `intersection-snapping` recipe covers guide vertices during drawing, moving, and corner resizing, toggle eligibility, continuous guide snaps, and pan and zoom. Other move targets and resize handles require additional recipes.
 
 ## Proof reporting
 

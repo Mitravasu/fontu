@@ -53,6 +53,56 @@ void prepare(Canvas &canvas) {
 class CanvasTests : public QObject {
     Q_OBJECT
 private slots:
+    void opaquePreviewPreservesFillRulesAndProjectState() {
+        Canvas canvas;
+        prepare(canvas);
+        for (const auto rule : {Qt::OddEvenFill, Qt::WindingFill}) {
+            QPainterPath ring;
+            ring.setFillRule(rule);
+            ring.addRect(QRectF(-200,100,200,200));
+            ring.moveTo(-140,160);
+            ring.lineTo(-140,240);
+            ring.lineTo(-60,240);
+            ring.lineTo(-60,160);
+            ring.closeSubpath();
+            auto project = canvas.projectSnapshot();
+            project.glyphs[0].shapes = {{1, ring, ShapePaint::Filled}};
+            canvas.restoreProject(project);
+            const auto bytes = projectBytes(canvas.projectSnapshot());
+            const auto point = [&canvas](QPointF p) { return canvas.viewport().toScreen(p).toPoint(); };
+            QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, point({-170,150}));
+            const auto selected = canvas.document().selectedIds();
+            const auto before = canvas.grab().toImage();
+            canvas.setRenderMode(RenderMode::Opaque);
+            const auto opaque = canvas.grab().toImage();
+            QCOMPARE(opaque.pixelColor(point({-170,150})), QColor(Qt::black));
+            QCOMPARE(opaque.pixelColor(point({-100,200})), before.pixelColor(point({-100,200})));
+            QVERIFY(opaque.pixelColor(point({-100,200})) != QColor(Qt::black));
+            QCOMPARE(projectBytes(canvas.projectSnapshot()), bytes);
+            QCOMPARE(canvas.document().selectedIds(), selected);
+            QVERIFY(!canvas.canUndo());
+            canvas.setRenderMode(RenderMode::XRay);
+            QCOMPARE(canvas.grab().toImage().pixelColor(point({-170,150})), before.pixelColor(point({-170,150})));
+        }
+    }
+    void moveAndResizeAcquireGuideIntersection() {
+        Canvas canvas;
+        prepare(canvas);
+        const auto target = canvas.viewport().toScreen({0, 500});
+        const auto anchor = target.toPoint();
+        canvas.setTool(Tool::Rectangle);
+        drag(canvas, anchor + QPoint(60, 60), anchor + QPoint(100, 100));
+        canvas.setGeometrySnapEnabled(true);
+        canvas.setTool(Tool::Select);
+        drag(canvas, anchor + QPoint(80, 80), anchor + QPoint(23, 23));
+        auto bounds = canvas.viewport().transform().mapRect(canvas.document().shapes()[0].path.boundingRect());
+        QVERIFY(QLineF(bounds.topLeft(), target).length() < 1e-7);
+        canvas.undo();
+        bounds = canvas.viewport().transform().mapRect(canvas.document().shapes()[0].path.boundingRect());
+        drag(canvas, bounds.topLeft().toPoint(), anchor + QPoint(3, 3));
+        bounds = canvas.viewport().transform().mapRect(canvas.document().shapes()[0].path.boundingRect());
+        QVERIFY(QLineF(bounds.topLeft(), target).length() < 1e-7);
+    }
     void multiSelectedMoveAndCancellation() {
         Canvas canvas;
         prepare(canvas);

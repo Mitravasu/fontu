@@ -101,6 +101,19 @@ void ProjectWindow::setupEditorChrome() {
         canvas->resetView();
         canvas->setFocus();
     });
+    auto *view = menuBar()->addMenu("&View");
+    auto *opaque = toolbar->addAction("Opaque preview");
+    opaque->setObjectName("opaquePreview");
+    opaque->setCheckable(true);
+    opaque->setToolTip("Fill completed shapes solid black. Turn off to return to X-ray view.");
+    view->addAction(opaque);
+    QObject::connect(opaque, &QAction::toggled, canvas, [canvas](bool checked) {
+        canvas->setRenderMode(checked ? RenderMode::Opaque : RenderMode::XRay);
+        canvas->setFocus();
+    });
+    QObject::connect(canvas, &Canvas::renderModeChanged, opaque, [opaque](RenderMode mode) {
+        opaque->setChecked(mode == RenderMode::Opaque);
+    });
     auto *status = statusBar();
     QObject::connect(canvas, &fontu::Canvas::controlsHintChanged, status,
                      [status](const QString &hint) { status->showMessage(hint); });

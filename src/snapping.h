@@ -14,4 +14,7 @@ std::optional<SnapResult> snapPoint(const QPointF &screenPoint, const Document &
                                   const Viewport &viewport, SnapOptions options,
                                   std::optional<ShapeId> excluded = {},
                                   SnapAxes axes = SnapAxes::Both, const std::vector<ShapeId> &excludedIds = {});
+std::optional<std::pair<SnapResult, QPointF>> snapBounds(
+        const QRectF &screenBounds, const Document &document, const Viewport &viewport,
+        SnapOptions options, std::optional<ShapeId> excluded = {}, const std::vector<ShapeId> &excludedIds = {});
 }

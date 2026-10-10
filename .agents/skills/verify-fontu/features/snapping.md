@@ -45,3 +45,11 @@ This command proves the toggle UI, drawing hover markers for grid/geometry/both,
 - The edited shape is excluded from its own geometry targets.
 - Bounds snap points can lie inside shapes or at ellipse bounds corners.
 - Changing an option cancels an unfinished geometry edit.
+
+## Guide intersection regression
+
+Run `control-fontu intersection-snapping --evidence /private/tmp/fontu-proof-intersections-01` from the helper directory, or use the full helper path from the repository root. Use a new evidence directory.
+
+The recipe creates x-height at 497 font units through the creation form. The value differs from visible grid rows. It checks Rectangle hover and draw starts at the origin crossing and grid crossings. It also draws a rectangle, moves its corner to each crossing, undoes the move, and resizes that corner to the same crossing. It also checks continuous guide snaps away from crossings, all four Snap combinations, the radial eight-pixel threshold, and crossings after pan and wheel zoom. The final creation disables x-height through its checkbox and checks that its crossing disappears.
+
+This recipe uses Qt events in the production window. Native OS input and the other resize handles remain unverified. Core tests cover axis-constrained intersection eligibility, exact threshold behavior, off-crossing sliding, and nearer shape and grid targets during grouped move selection.

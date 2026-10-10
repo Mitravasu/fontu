@@ -183,6 +183,12 @@ void Canvas::setTool(Tool tool) {
     emit toolChanged(tool);
     update();
 }
+void Canvas::setRenderMode(RenderMode mode) {
+    if (renderMode_ == mode) return;
+    renderMode_ = mode;
+    emit renderModeChanged(mode);
+    update();
+}
 void Canvas::refreshBuilder() {
     builder_.reset();
     if (tool_ == Tool::ShapeBuilder) builder_.emplace(document());
@@ -304,15 +310,21 @@ void Canvas::paintEvent(QPaintEvent *) {
     painter.setTransform(viewport_.transform());
     for (const auto &shape : activeGlyph().document.shapes()) {
         const bool selected = activeGlyph().document.isSelected(shape.id);
-        painter.setPen(cosmeticPen(selected ? QColor("#2563eb") : QColor("#334155"), 1.5));
-        painter.setBrush(shape.paint == ShapePaint::Stroke ? QBrush(Qt::NoBrush)
-                         : QBrush(selected ? QColor(96, 165, 250, 80) : QColor(100, 116, 139, 75)));
+        if (renderMode_ == RenderMode::Opaque) {
+            painter.setPen(shape.paint == ShapePaint::Stroke ? cosmeticPen(Qt::black, 1.5) : QPen(Qt::NoPen));
+            painter.setBrush(shape.paint == ShapePaint::Stroke ? QBrush(Qt::NoBrush) : QBrush(Qt::black));
+        } else {
+            painter.setPen(cosmeticPen(selected ? QColor("#2563eb") : QColor("#334155"), 1.5));
+            painter.setBrush(shape.paint == ShapePaint::Stroke ? QBrush(Qt::NoBrush)
+                             : QBrush(selected ? QColor(96, 165, 250, 80) : QColor(100, 116, 139, 75)));
+        }
         painter.drawPath(shape.path);
     }
     if (builder_) {
         painter.setPen(cosmeticPen(QColor("#2563eb"), 1));
         painter.setBrush(Qt::NoBrush);
-        for (const auto &region : builder_->geometry.regions()) painter.drawPath(region.path);
+        if (renderMode_ == RenderMode::XRay)
+            for (const auto &region : builder_->geometry.regions()) painter.drawPath(region.path);
         const bool subtract = builder_->gesture && builder_->gesture->operation == BuilderOperation::Subtract;
         painter.setBrush(subtract ? QColor(239, 68, 68, 125) : QColor(37, 99, 235, 110));
         painter.setPen(cosmeticPen(subtract ? QColor("#dc2626") : QColor("#1d4ed8"), 2));
@@ -552,14 +564,8 @@ void Canvas::updateGesture(const QPointF &position) {
     update();
 }
 std::optional<std::pair<SnapResult, QPointF>> Canvas::moveSnap(const QRectF &bounds, ShapeId excluded) const {
-    std::optional<std::pair<SnapResult, QPointF>> best;
-    for (const auto &point : boundsSnapPoints(bounds)) {
-        if (auto snap = snapPoint(point, activeGlyph().document, viewport_, snapOptions_, excluded, SnapAxes::Both, activeGlyph().document.selectedIds())) {
-            if (!best || snap->distance < best->first.distance)
-                best = std::make_pair(*snap, snap->point - point);
-        }
-    }
-    return best;
+    return snapBounds(bounds, activeGlyph().document, viewport_, snapOptions_, excluded,
+                      activeGlyph().document.selectedIds());
 }
 bool Canvas::canClosePen(const QPointF &position) const {
     return penDraft_.size() >= 3

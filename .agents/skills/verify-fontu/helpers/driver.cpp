@@ -64,6 +64,7 @@ void record(const QString &action) {
         {"grid",canvas->gridSnapEnabled()},{"geometry",canvas->geometrySnapEnabled()},
         {"canUndo",canvas->canUndo()},{"canRedo",canvas->canRedo()},{"zoom",canvas->viewport().zoom()},{"screenshot",stem + ".png"}};
     state.insert("activeGlyphId", double(canvas->activeGlyphId().value));
+    state.insert("renderMode", canvas->renderMode() == fontu::RenderMode::Opaque ? "opaque" : "xray");
     const auto &definition=canvas->document().definition();
     state.insert("bounds",QJsonArray{definition.bounds.x(),definition.bounds.y(),definition.bounds.width(),definition.bounds.height()});
     state.insert("unitsPerEm",definition.unitsPerEm);
@@ -511,6 +512,110 @@ void fileMenu(const QString &name) {
     QTest::mouseClick(menu, Qt::LeftButton, Qt::NoModifier, menu->actionGeometry(action).center());
     QApplication::processEvents();
 }
+void opaquePreview() {
+    window->resize(1100,760); QApplication::processEvents();
+    legacyView();
+    auto *action = window->findChild<QAction *>("opaquePreview");
+    require(action && !action->isChecked() && canvas->renderMode() == fontu::RenderMode::XRay,
+            "opaque preview must start in X-ray mode");
+    toolbar("Rectangle (R)"); drag({100,100},{200,200}); drag({150,100},{250,200});
+    toolbar("Select (V)");
+    const auto xray = canvas->grab().toImage();
+    require(xray.pixelColor(125,151) != QColor(Qt::black)
+            && xray.pixelColor(175,151) != xray.pixelColor(125,151), "X-ray overlap not visible");
+    const auto toggle = [action](bool throughMenu) {
+        const auto bytes = fontu::projectBytes(canvas->projectSnapshot());
+        const auto selected = canvas->document().selectedIds();
+        const auto tool = canvas->tool();
+        const bool undo = canvas->canUndo(), redo = canvas->canRedo(), dirty = window->isWindowModified();
+        const bool checked = action->isChecked();
+        if (throughMenu) {
+            QMenu *view = nullptr;
+            for (auto *menu : window->menuBar()->findChildren<QMenu *>())
+                if (menu->title() == "&View") view = menu;
+            require(view && view->actions().contains(action), "View menu preview action missing");
+            QTest::mouseClick(window->menuBar(), Qt::LeftButton, Qt::NoModifier,
+                              window->menuBar()->actionGeometry(view->menuAction()).center());
+            QApplication::processEvents(); record("View menu exposes Opaque preview");
+            QTest::mouseClick(view, Qt::LeftButton, Qt::NoModifier, view->actionGeometry(action).center());
+        } else {
+            auto *button = window->findChild<QToolBar *>()->widgetForAction(action);
+            require(button && button->isVisible(), "Opaque preview toolbar button missing");
+            QTest::mouseClick(button, Qt::LeftButton);
+        }
+        QApplication::processEvents();
+        require(action->isChecked() != checked
+                && action->isChecked() == (canvas->renderMode() == fontu::RenderMode::Opaque), "preview toggle failed");
+        require(fontu::projectBytes(canvas->projectSnapshot()) == bytes && canvas->document().selectedIds() == selected
+                && canvas->tool() == tool && canvas->canUndo() == undo && canvas->canRedo() == redo
+                && window->isWindowModified() == dirty, "preview changed project, selection, tool, history or dirty state");
+        record(throughMenu ? "View menu toggles preview without editing" : "Toolbar toggles preview without editing");
+    };
+    toggle(false);
+    auto image = canvas->grab().toImage();
+    for (const QPoint point : {QPoint(125,151), QPoint(175,151), QPoint(225,151)})
+        require(image.pixelColor(point) == QColor(Qt::black), "opaque fill or internal overlap edge is not solid black");
+    require(image.pixelColor(150,140).blue() > image.pixelColor(150,140).red(), "selected bounds feedback missing");
+    record("Selected and overlapping rectangles have solid black interiors with selection bounds and handles");
+    toggle(false);
+    require(canvas->grab().toImage().pixelColor(175,151) == xray.pixelColor(175,151), "X-ray rendering did not return");
+    QTest::mouseClick(canvas, Qt::LeftButton, Qt::NoModifier, {300,320});
+    toggle(false);
+    image = canvas->grab().toImage();
+    require(image.pixelColor(150,151) == QColor(Qt::black) && image.pixelColor(200,151) == QColor(Qt::black),
+            "opaque preview shows internal source edges");
+    record("Deselected opaque rectangles show no internal source edges");
+    toggle(false);
+    toolbar("Rectangle (R)"); drag({350,100},{550,300}); drag({410,160},{490,240});
+    toolbar("Select (V)");
+    QTest::mouseClick(canvas,Qt::LeftButton,Qt::NoModifier,{375,151});
+    QTest::mouseClick(canvas,Qt::LeftButton,Qt::ShiftModifier,{450,191});
+    toolbar("Shape Builder (B)");
+    QTest::mouseClick(canvas,Qt::LeftButton,Qt::AltModifier,{450,191});
+    move({600,350}, Qt::NoButton);
+    toggle(false);
+    image = canvas->grab().toImage();
+    require(image.pixelColor(375,151) == QColor(Qt::black) && image.pixelColor(450,191) != QColor(Qt::black),
+            "Shape Builder hole was filled in opaque preview");
+    require(image.pixelColor(150,151) == QColor(Qt::black), "idle Builder partition seam visible in opaque preview");
+    record("Opaque Builder result preserves its hole and hides idle region outlines");
+    move({375,151}, Qt::NoButton);
+    image = canvas->grab().toImage();
+    require(image.pixelColor(375,151).blue() > image.pixelColor(375,151).red() + 20, "opaque Builder hover highlight missing");
+    record("Opaque Builder hover stays visible over black fill");
+    const auto beforeGesture = fontu::projectBytes(canvas->projectSnapshot());
+    QTest::mousePress(canvas, Qt::LeftButton, Qt::NoModifier, {375,151});
+    move({375,251}, Qt::LeftButton);
+    image = canvas->grab().toImage();
+    require(image.pixelColor(375,251).blue() > image.pixelColor(375,251).red() + 20
+            && fontu::projectBytes(canvas->projectSnapshot()) == beforeGesture, "opaque Builder held preview missing or edits early");
+    record("Opaque Builder held drag previews regions without editing geometry");
+    key(Qt::Key_Escape, "Cancel opaque Builder drag");
+    QTest::mouseRelease(canvas, Qt::LeftButton, Qt::NoModifier, {375,251});
+    move({600,350}, Qt::NoButton);
+    toolbar("Pen (P)"); penClick({100,350}); penClick({200,350}); penClick({200,450});
+    key(Qt::Key_Return, "Commit open Pen stroke"); toolbar("Select (V)");
+    QTest::mouseClick(canvas, Qt::LeftButton, Qt::NoModifier, {300,450});
+    image = canvas->grab().toImage();
+    require(image.pixelColor(160,381) != QColor(Qt::black), "opaque preview filled an open stroke");
+    require(image.pixelColor(150,350).red() < 100, "opaque preview lost open stroke");
+    record("Open Pen path stays stroked and unfilled in opaque preview");
+    window->resize(800,600); QApplication::processEvents();
+    toggle(true); toggle(true);
+    key(Qt::Key_0, "Reset view at 800 pixels");
+    require(canvas->renderMode() == fontu::RenderMode::Opaque && action->isChecked(), "Reset view changed preview mode");
+    auto *picker = window->findChild<QListWidget *>("glyphPicker");
+    QTest::mouseClick(picker->viewport(), Qt::LeftButton, Qt::NoModifier, picker->visualItemRect(picker->item(1)).center());
+    require(canvas->activeGlyphId().value == 2 && canvas->renderMode() == fontu::RenderMode::Opaque,
+            "glyph switch changed preview mode");
+    record("Preview stays enabled through Reset view and glyph selection at 800 pixels");
+    key(Qt::Key_R, "Draw in second glyph while opaque");
+    const auto from = canvas->viewport().toScreen({-150,150}).toPoint();
+    const auto to = canvas->viewport().toScreen({150,350}).toPoint();
+    drag(from,to);
+    require(canvas->grab().toImage().pixelColor((from+to)/2) == QColor(Qt::black), "second glyph not rendered opaque");
+    record("Second glyph drawings use the retained opaque mode");
+}
 void shapeBuilder() {
     const auto initial = output + "/initial.fontu";
     require(fontu::writeProject(initial, canvas->projectSnapshot()).isEmpty(), "builder fixture write failed");
@@ -799,18 +904,112 @@ void run() {
                 && window->findChild<QPushButton *>("welcomeOpen")->isVisible()
                 && !window->findChild<QAction *>("saveProject")->isEnabled(), "doctor: welcome controls missing");
         record("Doctor passed: fresh production welcome, Create and Open, disabled Save, retained empty Canvas");
+        if(feature == "intersection-snapping") formField("xHeight", "497");
         if(feature != "creation") {
             QTest::mouseClick(window->findChild<QPushButton *>("createProject"),Qt::LeftButton);
             QApplication::processEvents();
             require(projectWindow->hasProject() && canvas->isVisible(), "default Create failed");
             record("Create default Numbers project through welcome button");
         }
-        if(feature != "glyph" && feature != "glyphs" && feature != "persistence" && feature != "creation") {
+        if(feature != "glyph" && feature != "glyphs" && feature != "persistence" && feature != "creation" && feature != "intersection-snapping") {
             window->resize(window->width()+1100-canvas->width(),window->height());
             QApplication::processEvents();
             legacyView();
         }
-        if(feature=="shape-builder") {
+        if(feature=="intersection-snapping") {
+            toolbar("Rectangle (R)");
+            snap("snapToGeometry");
+            bool matched = true;
+            const auto drawAt = [&](QPoint from, QPointF target, const QString &label) {
+                move(from, Qt::NoButton);
+                record(label + " hover before press");
+                drag(from, from + QPoint(60,60));
+                const auto actual = canvas->viewport().toDocument(bounds(int(canvas->document().shapes().size()) - 1).topLeft());
+                const bool pass = QLineF(actual, target).length() < 1e-7;
+                matched &= pass;
+                record(QString("%1 %2 expected (%3,%4), actual (%5,%6)")
+                       .arg(pass ? "PASS" : "FAIL", label)
+                       .arg(target.x(),0,'g',12).arg(target.y(),0,'g',12)
+                       .arg(actual.x(),0,'g',12).arg(actual.y(),0,'g',12));
+                toolbar("Undo");
+            };
+            const auto drawStart = [&](QPointF target, QPoint offset, const QString &label) {
+                drawAt(canvas->viewport().toScreen(target).toPoint() + offset, target, label);
+            };
+            const auto editAt = [&](QPointF documentTarget, QPoint offset, const QString &label) {
+                const auto exactTarget = canvas->viewport().toScreen(documentTarget);
+                const auto editTarget = exactTarget.toPoint();
+                if (canvas->gridSnapEnabled()) snap("snapToGrid");
+                drag(editTarget + QPoint(60,60), editTarget + QPoint(100,100));
+                if (label == "guide-grid") snap("snapToGrid");
+                toolbar("Select (V)");
+                drag(editTarget + QPoint(80,80), editTarget + QPoint(20,20) + offset);
+                const auto moved = bounds(0).topLeft();
+                record(QString("MOVE %1 intersection expected (%2,%3), actual (%4,%5)")
+                       .arg(label).arg(exactTarget.x()).arg(exactTarget.y()).arg(moved.x()).arg(moved.y()));
+                const bool movedToIntersection = QLineF(moved, exactTarget).length()<1e-7;
+                toolbar("Undo");
+                drag(bounds(0).topLeft().toPoint(), editTarget + offset);
+                const auto resized = bounds(0).topLeft();
+                record(QString("RESIZE %1 intersection expected (%2,%3), actual (%4,%5)")
+                       .arg(label).arg(exactTarget.x()).arg(exactTarget.y()).arg(resized.x()).arg(resized.y()));
+                require(QLineF(resized, exactTarget).length()<1e-7, "corner resize failed intersection acquisition");
+                require(movedToIntersection, "move failed intersection acquisition");
+                toolbar("Undo"); toolbar("Undo"); toolbar("Rectangle (R)");
+            };
+            editAt({0,497}, {3,3}, "guide-guide");
+            drawStart({0,497},{3,3},"guide-guide crossing");
+            const auto gridX = fontu::gridStep(canvas->viewport().zoom()) * 4;
+            editAt({gridX,497}, {3,1}, "guide-grid");
+            drawStart({gridX,497},{3,1},"guide-grid crossing off grid row");
+            require(matched,"guide intersection acquisition failed; see FAIL action records");
+            const auto screen = [](QPointF target) { return canvas->viewport().toScreen(target).toPoint(); };
+            hover(screen({0,497}) + QPoint(3,3), screen({0,497}), "Guide-guide vertex");
+            hover(screen({gridX,497}) + QPoint(3,1), screen({gridX,497}), "Guide-grid vertex off grid row");
+            drawStart({0,300},{3,3},"origin-grid crossing");
+            snap("snapToGrid");
+            auto from = screen({137,497}) + QPoint(0,3);
+            auto expected = canvas->viewport().toDocument(from); expected.setY(497);
+            drawAt(from,expected,"continuous guide away from crossing");
+            from = screen({gridX,497}) + QPoint(3,1);
+            expected = canvas->viewport().toDocument(from); expected.setY(497);
+            drawAt(from,expected,"geometry only does not acquire grid crossing");
+            from = screen({0,497}) + QPoint(6,6);
+            const auto raw = canvas->viewport().toDocument(from);
+            const QPointF horizontal(raw.x(),497), vertical(0,raw.y());
+            expected = QLineF(QPointF(from),canvas->viewport().toScreen(horizontal)).length()
+                     < QLineF(QPointF(from),canvas->viewport().toScreen(vertical)).length() ? horizontal : vertical;
+            require(QLineF(QPointF(from),canvas->viewport().toScreen({0,497})).length()>8,"threshold trigger too near");
+            drawAt(from,expected,"outside radial eight-pixel threshold remains on guide");
+            snap("snapToGeometry");
+            from = screen({0,497}) + QPoint(3,3);
+            drawAt(from,canvas->viewport().toDocument(from),"both snapping options off");
+            snap("snapToGrid");
+            drawAt(screen({gridX,497}) + QPoint(3,1),{gridX,500},"grid only uses visible grid row");
+            snap("snapToGeometry");
+            drag({450,250},{480,270},Qt::MiddleButton);
+            QWheelEvent wheel(QPointF(400,300),canvas->mapToGlobal(QPoint(400,300)),{}, {0,120},Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+            QApplication::sendEvent(canvas,&wheel);
+            record("Pan and wheel zoom before transformed intersection checks");
+            drawStart({0,497},{3,3},"guide-guide crossing after pan and zoom");
+            drawStart({fontu::gridStep(canvas->viewport().zoom())*4,497},{3,1},"guide-grid crossing after pan and zoom");
+            fileMenu("newProject");
+            formField("xHeight","497");
+            auto *enabled=window->findChild<QCheckBox *>("xHeightEnabled");
+            window->findChild<QScrollArea *>("creationScroll")->ensureWidgetVisible(enabled);
+            QTest::mouseClick(enabled,Qt::LeftButton,Qt::NoModifier,QPoint(8,enabled->height()/2));
+            require(!enabled->isChecked(),"x-height toggle failed");
+            createClick();
+            require(!canvas->document().definition().guideEnabled.xHeight,"disabled guide admitted");
+            if(canvas->gridSnapEnabled()) snap("snapToGrid");
+            if(!canvas->geometrySnapEnabled()) snap("snapToGeometry");
+            toolbar("Rectangle (R)");
+            from = screen({gridX,497}) + QPoint(3,1);
+            drawAt(from,canvas->viewport().toDocument(from),"disabled guide does not acquire crossing");
+            require(matched,"intersection snapping regression; see FAIL action records");
+        } else if(feature=="opaque-preview") {
+            opaquePreview();
+        } else if(feature=="shape-builder") {
             shapeBuilder();
         } else if(feature=="creation") {
             creation();
