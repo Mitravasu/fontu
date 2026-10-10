@@ -6,15 +6,17 @@ Read the matching recipe before running `control-fontu`. Every run starts its ow
 
 Run commands from the repository root. Each named command builds, launches, checks readiness with doctor, exercises its scenario, captures screenshots and state, and cleans up. The helper injects Qt events into the unchanged production window. It does not send native OS input. See [the skill](../SKILL.md) for the evidence contract and cleanup checks.
 
-Each feature entry lists all known user controls, then separates the scripted coverage from the remaining checks. A pass for a shortcut does not prove its toolbar counterpart. Native-menu, trackpad, and focus behavior remain separate checks. There is no saving, undo, or font export in this milestone.
+Each feature entry lists all known user controls, then separates the scripted coverage from the remaining checks. A pass for a shortcut does not prove its toolbar counterpart. Native input, trackpad, and focus behavior remain separate checks. There is no saving or font export in this milestone. Undo and Redo restore completed canvas edits and individual vertices in unfinished Pen paths.
 
 ## Features
 
 - [Drawing shapes](drawing.md) covers Rectangle and Ellipse toolbar/keyboard selection, drags, tiny-drag rejection, and Escape cancellation.
 - [Pen paths](pen.md) covers Pen toolbar/keyboard selection, lines, corners, symmetric cubic handles, Enter commit, click closure, filled interior selection, cancellation, draft navigation, snapping, and stroke editing.
+- [Undo and redo](history.md) covers toolbar buttons, Qt standard shortcut bindings, edit transactions, Pen vertex history, redo invalidation, no-op preservation, and cancellation.
+- [Bottom status hints](status.md) covers initial tool hints, Pen closure hints through vertex Undo and Redo, completion and cancellation, draft navigation, and readability at 1100 and 800 pixels.
 - [Selecting and editing](editing.md) covers Select toolbar/keyboard, move, one corner resize, deselection, Delete, and Backspace. It lists remaining handle and rollback checks.
 - [Navigating the canvas](navigation.md) covers wheel events, both pan controls, and both Reset view controls. Native trackpad delivery remains unverified.
-- [Snapping](snapping.md) covers the two Snap menu checkboxes, all four toggle combinations, pre-press drawing hover targets, and a geometry-snapped drawing start. Move and resize effects require additional recipes.
+- [Snapping](snapping.md) covers the two Snap toolbar toggles, all four toggle combinations, pre-press drawing hover targets, and a geometry-snapped drawing start. Move and resize effects require additional recipes.
 
 ## Proof reporting
 

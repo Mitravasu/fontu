@@ -7,7 +7,7 @@ description: Verify fontu's Qt desktop canvas after changes to shape drawing, Pe
 
 Read [the feature index](features/README.md), then the requested feature recipe. The app is a Qt 6 / C++17 desktop canvas. Its document is session-only. Keep the user's desktop instance open and untouched.
 
-This skill verifies Qt event routing through the unchanged production `src/main.cpp` window with the offscreen backend. It injects mouse and keyboard events into real widgets, clicks toolbar buttons and the real Snap menu, and reads document/view state only for assertions and evidence. It does not verify native OS mouse input, accessibility, macOS global menus, trackpad delivery, or desktop focus behavior. Report this boundary with every result. Existing `canvas_tests` use standalone widgets and internal setters; use them as regression checks, not as proof of the production window.
+This skill verifies Qt event routing through the unchanged production `src/main.cpp` window with the offscreen backend. It injects mouse and keyboard events into real widgets, clicks toolbar buttons including both Snap toggles, and reads document/view state only for assertions and evidence. It does not verify native OS mouse input, accessibility, macOS global menus, trackpad delivery, or desktop focus behavior. Report this boundary with every result. Existing `canvas_tests` use standalone widgets and internal setters; use them as regression checks, not as proof of the production window.
 
 ## Launch
 
@@ -31,15 +31,15 @@ Choose a new evidence directory for every invocation. The helper refuses an exis
 
 ## Doctor
 
-The helper's first operation is a read-only check within the instance it just started. It requires the visible `fontu • Shape canvas` production window, a Canvas central widget, the `Shape tools` toolbar, one Snap menu, and an empty document. The first screenshot and state record capture that baseline. `run.json` records the owned PID, executable, Qt backend, feature, and source hashes.
+The helper's first operation is a read-only check within the instance it just started. It requires the visible `fontu • Shape canvas` production window, a Canvas central widget, the `Shape tools` toolbar, both Snap toggles, no menu bar, and an empty document. The first screenshot and state record capture that baseline. `run.json` records the owned PID, executable, Qt backend, feature, and source hashes.
 
 If anything looks wrong, start a fresh helper run and inspect its first record, `run.json`, and logs before further driving. This short-lived app has no remote control port or attach command. Do not attach to the user's desktop instance.
 
 ## Drive
 
-`control-fontu` accepts `drawing`, `pen`, `editing`, `navigation`, and `snapping`. Each invocation starts a fresh empty document and executes the corresponding recipe in the feature map. Toolbar handles are their exact action text. Snap handles are `snapToGrid` and `snapToGeometry`. Canvas coordinates are logical pixels relative to the widget. The helper uses the production window's default 1100 by 760 sizing.
+`control-fontu` accepts `drawing`, `pen`, `editing`, `navigation`, `snapping`, `history`, and `status`. The `history` recipe exercises Undo and Redo buttons and Qt standard platform bindings. The `status` recipe checks bottom hints through Pen draft changes and at smaller window sizes. Each invocation starts a fresh empty document and executes the corresponding recipe in the feature map. Toolbar handles are their exact action text. Snap handles are `snapToGrid` and `snapToGeometry`. Canvas coordinates are logical pixels relative to the widget. The helper uses the production window's default 1100 by 760 sizing.
 
-For Snap and Pen runs, the helper makes the production menu local with `setNativeMenuBar(false)` because the offscreen backend has no OS menu. It clicks that menu's widget and its actions. The snapping recipe proves the production toggle connections and checks all four toggle combinations. It also captures pre-press drawing hover circles and asserts that a drawn start matches the geometry target. The Pen recipe verifies anchor and handle snapping with exact path elements. These runs do not prove the macOS menu bar.
+Snap and Pen runs click the production toolbar toggles. The snapping recipe checks visibility and toggling at 800 by 600, restores 1100 by 760, and proves all four toggle combinations. It also captures pre-press drawing hover circles and asserts that a drawn start matches the geometry target. The Pen recipe verifies anchor and handle snapping with exact path elements.
 
 For user reports involving OS-specific behavior, use Computer Use on a separately launched, positively identified disposable instance if native observation and input permissions are available. Verify ownership before any input. This skill's event proof cannot substitute for that check. If safe isolation or permissions are unavailable, record the unmet precondition and leave that entry point unverified.
 
@@ -47,7 +47,7 @@ For user reports involving OS-specific behavior, use Computer Use on a separatel
 
 Evidence stays in the exact directory passed to `--evidence`, outside the temporary build. Retain `run.json`, `build.log`, `app.log`, `actions.jsonl`, and numbered PNGs. Visible popup menus have additional `-menu.png` images linked in their state record. Failure diagnostics also survive. Each state record names its action, feature, backend, tool, selection, snap options, zoom, shape bounds, path elements, and screenshot. Drag previews capture the held gesture before release. Read-only state assertions accompany screenshots so a drawn shape is checked by its expected bounds and path type.
 
-Require the initial doctor record, action records for every entry point claimed, the corresponding screenshots, the final `PASS:` record, and exit zero. Inspect screenshots for visible app identity and the claimed change. Report a skipped entry point separately. `snapping` proves menu toggles, drawing hover markers for grid/geometry/both, unchanged document state on hover, and a geometry-snapped drawing start. Moving and resizing snap effects, all eight resize handles, focus-loss cancellation, crossing resize anchors, overlap order, and wheel limits need additional production-window or native recipes before a full feature claim.
+Require the initial doctor record, action records for every entry point claimed, the corresponding screenshots, the final `PASS:` record, and exit zero. Inspect screenshots for visible app identity and the claimed change. Report a skipped entry point separately. `snapping` proves toolbar toggles, drawing hover markers for grid/geometry/both, unchanged document state on hover, and a geometry-snapped drawing start. Moving and resizing snap effects, all eight resize handles, focus-loss cancellation, crossing resize anchors, overlap order, and wheel limits need additional production-window or native recipes before a full feature claim.
 
 There are no persistence, export, network, or external-service features in this milestone. Closing the verification window discards its disposable document. The helper writes build/evidence files only; it uses no mock document and invokes no Canvas setters to prepare state.
 

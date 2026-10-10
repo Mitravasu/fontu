@@ -1,11 +1,13 @@
 #include "canvas.h"
 #include <QFocusEvent>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QResizeEvent>
 #include <QWheelEvent>
 #include <cmath>
+#include <algorithm>
 
 namespace fontu {
 namespace {
@@ -27,6 +29,65 @@ Canvas::Canvas(QWidget *parent) : QWidget(parent) {
     setMouseTracking(true);
     setMinimumSize(400, 300);
     setAutoFillBackground(false);
+    const auto publishHint = [this] { emit controlsHintChanged(controlsHint()); };
+    connect(this, &Canvas::toolChanged, this, publishHint);
+    connect(this, &Canvas::historyChanged, this, publishHint);
+}
+QString Canvas::controlsHint() const {
+    if (tool_ == Tool::Pen) {
+        return (penDraft_.size() >= 3
+            ? QStringLiteral("Click first anchor to fill • Enter for open path")
+            : QStringLiteral("Click anchors • Enter for open path"))
+            + QStringLiteral(" • Drag later anchors to curve • Esc cancels • Wheel zooms • Space+drag pans");
+    }
+    return QStringLiteral("Drag draws or moves • Handles resize • Delete removes selection • Esc cancels or clears • Wheel zooms • Space+drag pans");
+}
+void Canvas::recordEdit(Document before) {
+    const auto &oldShapes = before.shapes();
+    const auto &newShapes = document_.shapes();
+    if (oldShapes.size() == newShapes.size()
+        && std::equal(oldShapes.begin(), oldShapes.end(), newShapes.begin(), [](const Shape &a, const Shape &b) {
+            return a.id == b.id && a.paint == b.paint && a.path == b.path;
+        })) return;
+    history_.erase(history_.begin() + historyPosition_, history_.end());
+    history_.push_back({std::move(before), document_});
+    historyPosition_ = history_.size();
+    emit historyChanged();
+}
+void Canvas::undo() {
+    if (stepPenHistory(false)) return;
+    cancelGesture();
+    if (!canUndo()) return;
+    document_ = history_[--historyPosition_].before;
+    updateHoverSnap();
+    if (hoverPosition_) updateCursor(*hoverPosition_);
+    emit historyChanged();
+    update();
+}
+void Canvas::redo() {
+    if (stepPenHistory(true)) return;
+    cancelGesture();
+    if (!canRedo()) return;
+    document_ = history_[historyPosition_++].after;
+    updateHoverSnap();
+    if (hoverPosition_) updateCursor(*hoverPosition_);
+    emit historyChanged();
+    update();
+}
+bool Canvas::stepPenHistory(bool forward) {
+    if (!hasPenHistory()) return false;
+    auto &source = forward ? penRedo_ : penDraft_;
+    auto &destination = forward ? penDraft_ : penRedo_;
+    if (source.empty()) return true;
+    destination.push_back(source.back());
+    source.pop_back();
+    gesture_ = Gesture::Idle;
+    snapMarker_.reset();
+    updateHoverSnap();
+    if (hoverPosition_) updateCursor(*hoverPosition_);
+    emit historyChanged();
+    update();
+    return true;
 }
 void Canvas::setTool(Tool tool) {
     cancelGesture();
@@ -181,11 +242,6 @@ void Canvas::paintEvent(QPaintEvent *) {
         painter.drawEllipse(*snapMarker_, 5, 5);
     }
     painter.setPen(QColor("#64748b"));
-    if (tool_ == Tool::Pen) {
-        painter.drawText(QRect(12, height() - 30, width() - 100, 22), Qt::AlignLeft,
-                         penDraft_.size() >= 3 ? "Click first anchor to fill. Enter for open path."
-                         : "Click anchors. Drag to curve. Enter for open path.");
-    }
     painter.drawText(QRect(12, height() - 30, width() - 24, 22), Qt::AlignRight,
                      QString::number(viewport_.zoom() * 100, 'f', 0) + "%");
 }
@@ -204,8 +260,11 @@ void Canvas::mousePressEvent(QMouseEvent *event) {
     } else if (event->button() == Qt::LeftButton) {
         if (tool_ == Tool::Pen) {
             if (canClosePen(position)) {
+                auto before = document_;
                 document_.select(document_.addPath(makePenPath(penDraft_, true), ShapePaint::Filled));
                 penDraft_.clear();
+                penRedo_.clear();
+                recordEdit(std::move(before));
                 updateCursor(position);
                 update();
                 return;
@@ -215,9 +274,12 @@ void Canvas::mousePressEvent(QMouseEvent *event) {
                 snapMarker_ = snap->point;
             }
             if (penDraft_.empty()) document_.select({});
+            penRedo_.clear();
             penDraft_.push_back({startDocument_, {}});
             gesture_ = Gesture::PenAnchor;
+            emit historyChanged();
         } else if (tool_ != Tool::Select) {
+            gestureBefore_ = document_;
             gesture_ = Gesture::Draw;
             if (auto snap = snapPoint(position, document_, viewport_, snapOptions_)) {
                 startDocument_ = viewport_.toDocument(snap->point);
@@ -234,7 +296,10 @@ void Canvas::mousePressEvent(QMouseEvent *event) {
                 editingId_ = document_.selection();
                 if (editingId_) gesture_ = Gesture::Move;
             }
-            if (editingId_) originalPath_ = document_.find(*editingId_)->path;
+            if (editingId_) {
+                originalPath_ = document_.find(*editingId_)->path;
+                gestureBefore_ = document_;
+            }
         }
     }
     update();
@@ -366,6 +431,8 @@ void Canvas::mouseReleaseEvent(QMouseEvent *event) {
         if (screenBounds.width() >= 3 && screenBounds.height() >= 3)
             document_.select(document_.addPath(preview_));
     }
+    if (gestureBefore_) recordEdit(std::move(*gestureBefore_));
+    gestureBefore_.reset();
     gesture_ = Gesture::Idle;
     editingId_.reset();
     originalPath_ = preview_ = {};
@@ -375,13 +442,17 @@ void Canvas::mouseReleaseEvent(QMouseEvent *event) {
     update();
 }
 void Canvas::cancelGesture() {
+    const bool hadPenHistory = hasPenHistory();
     if (editingId_ && (gesture_ == Gesture::Move || gesture_ == Gesture::Resize))
         document_.replacePath(*editingId_, originalPath_);
+    gestureBefore_.reset();
     gesture_ = Gesture::Idle;
     editingId_.reset();
     originalPath_ = preview_ = {};
     snapMarker_.reset();
     penDraft_.clear();
+    penRedo_.clear();
+    if (hadPenHistory) emit historyChanged();
     if (hoverPosition_) updateCursor(*hoverPosition_);
     update();
 }
@@ -397,25 +468,34 @@ void Canvas::wheelEvent(QWheelEvent *event) {
     event->accept();
 }
 void Canvas::keyPressEvent(QKeyEvent *event) {
-    if (event->key() == Qt::Key_Space) {
+    if (event->matches(QKeySequence::Undo)) {
+        undo();
+    } else if (event->matches(QKeySequence::Redo)) {
+        redo();
+    } else if (event->key() == Qt::Key_Space) {
         spaceHeld_ = true;
         snapMarker_.reset();
         update();
         if (gesture_ == Gesture::Idle) setCursor(Qt::OpenHandCursor);
     } else if (event->key() == Qt::Key_Escape) {
-        if (gesture_ == Gesture::Idle && penDraft_.empty()) { document_.select({}); snapMarker_.reset(); }
+        if (gesture_ == Gesture::Idle && !hasPenHistory()) { document_.select({}); snapMarker_.reset(); }
         else cancelGesture();
         update();
     } else if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) && tool_ == Tool::Pen) {
         if (gesture_ == Gesture::Idle && penDraft_.size() >= 2) {
+            auto before = document_;
             document_.select(document_.addPath(makePenPath(penDraft_), ShapePaint::Stroke));
             penDraft_.clear();
+            penRedo_.clear();
+            recordEdit(std::move(before));
             if (hoverPosition_) updateCursor(*hoverPosition_);
             update();
         }
     } else if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
         cancelGesture();
+        auto before = document_;
         document_.deleteSelection();
+        recordEdit(std::move(before));
         update();
     } else if (event->modifiers() == Qt::NoModifier) {
         if (event->key() == Qt::Key_V) setTool(Tool::Select);

@@ -1,6 +1,6 @@
 #pragma once
-class QMenuBar;
+class QToolBar;
 namespace fontu {
 class Canvas;
-void addSnapMenu(QMenuBar &menuBar, Canvas &canvas);
+void addSnapControls(QToolBar &toolbar, Canvas &canvas);
 }
