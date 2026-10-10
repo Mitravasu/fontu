@@ -14,6 +14,10 @@
 #include <QDir>
 #include <QListWidget>
 #include <QScrollBar>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QPushButton>
+#include <QLabel>
 #include <stdexcept>
 
 namespace {
@@ -44,7 +48,7 @@ void record(const QString &action) {
     }
     QJsonObject state{{"action",action},{"feature",feature},{"backend",QApplication::platformName()},
         {"inputBoundary","Qt events to unchanged production window, not OS input"},
-        {"window",window->windowTitle()},{"shapes",shapes},{"tool",int(canvas->tool())},
+        {"window",window->windowTitle()},{"modified",window->isWindowModified()},{"shapes",shapes},{"tool",int(canvas->tool())},
         {"selected",canvas->document().selection() ? double(*canvas->document().selection()) : -1},
         {"grid",canvas->gridSnapEnabled()},{"geometry",canvas->geometrySnapEnabled()},
         {"canUndo",canvas->canUndo()},{"canRedo",canvas->canRedo()},{"zoom",canvas->viewport().zoom()},{"screenshot",stem + ".png"}};
@@ -412,12 +416,12 @@ void statusHint(bool closing) {
     require(window->statusBar()->geometry().top() >= canvas->geometry().bottom(), "status bar overlaps canvas");
     require(text.contains("Wheel zooms") && text.contains("Space+drag pans"), "navigation hints missing");
     require(text.contains("Click first anchor to fill") == closing, "Pen closure hint does not match draft");
-    require(window->statusBar()->fontMetrics().horizontalAdvance(text) + 40 <= window->statusBar()->width(),
+    require(window->statusBar()->fontMetrics().horizontalAdvance(text) + 12 <= window->findChild<QLabel *>("projectStatus")->geometry().left(),
             "status hint clips at normal window size");
 }
 void status() {
     statusHint(false);
-    require(window->statusBar()->currentMessage().contains("Delete removes selection"), "initial Select hint missing");
+    require(window->statusBar()->currentMessage().contains("Delete selection"), "initial Select hint missing");
     toolbar("Rectangle (R)"); statusHint(false);
     key(Qt::Key_E,"E"); statusHint(false);
     toolbar("Pen (P)"); statusHint(false);
@@ -447,23 +451,118 @@ void status() {
     penClick({100,100}); penClick({220,100}); penClick({220,200}); statusHint(true);
     record("Pen closure hint fits 800-pixel window");
 }
+template<class Dialog, class Callback>
+void whenModal(Callback callback) {
+    auto *timer = new QTimer(qApp);
+    QObject::connect(timer, &QTimer::timeout, [timer, callback] {
+        if (auto *dialog = qobject_cast<Dialog *>(QApplication::activeModalWidget())) {
+            timer->stop(); timer->deleteLater(); callback(dialog);
+        }
+    });
+    timer->start(1);
+}
+void prompt(QMessageBox::StandardButton choice) {
+    whenModal<QMessageBox>([choice](QMessageBox *dialog) {
+        QTest::mouseClick(dialog->button(choice), Qt::LeftButton);
+    });
+}
+void fileChoice(const QString &path, const std::function<void()> &after = {}) {
+    whenModal<QFileDialog>([path, after](QFileDialog *dialog) {
+        if (after) after();
+        dialog->selectFile(path);
+        QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+    });
+}
+void fileShortcut(QKeySequence::StandardKey key) {
+    window->activateWindow(); canvas->setFocus(); QApplication::processEvents();
+    const auto binding = QKeySequence::keyBindings(key).front()[0];
+    QTest::keyClick(canvas, Qt::Key(binding.key()), binding.keyboardModifiers());
+    QApplication::processEvents();
+}
+void fileMenu(const QString &name) {
+    auto *menu = window->menuBar()->actions().front()->menu();
+    auto *action = window->findChild<QAction *>(name);
+    require(menu && action, "File action missing");
+    menu->popup(window->menuBar()->mapToGlobal(QPoint(0, window->menuBar()->height())));
+    QApplication::processEvents(); record("File menu open for " + name);
+    QTest::mouseClick(menu, Qt::LeftButton, Qt::NoModifier, menu->actionGeometry(action).center());
+    QApplication::processEvents();
+}
+void persistence() {
+    auto *projectWindow = qobject_cast<fontu::ProjectWindow *>(window);
+    require(projectWindow, "production project window missing");
+    const auto initial = output + "/initial.fontu";
+    require(fontu::writeProject(initial, canvas->projectSnapshot()).isEmpty(), "fixture write failed");
+    fileChoice(initial); fileShortcut(QKeySequence::Open);
+    require(projectWindow->projectPath() == initial && !window->isWindowModified(), "Open shortcut failed");
+    record("Open shortcut loads a blank project through QFileDialog");
+    const auto screen = [](QPointF p) { return canvas->viewport().toScreen(p).toPoint(); };
+    toolbar("Rectangle (R)"); drag(screen({-200,100}), screen({-100,200}));
+    require(projectWindow->isProjectDirty() && window->isWindowModified(), "drawing did not mark project dirty");
+    auto *picker = window->findChild<QListWidget *>("glyphPicker");
+    QTest::mouseClick(picker->viewport(), Qt::LeftButton, Qt::NoModifier, picker->visualItemRect(picker->item(1)).center());
+    require(canvas->activeGlyphId().value == 2, "second glyph not selected");
+    toolbar("Pen (P)"); penClick(screen({-100,0})); drag(screen({100,200}),screen({140,250})); penClick(screen({200,0}));
+    key(Qt::Key_Return,"Commit cubic path before Save");
+    require(canvas->document().shapes()[0].path.elementAt(1).isCurveTo(), "Pen path is not cubic");
+    const auto snapshot = fontu::projectBytes(canvas->projectSnapshot());
+    fileShortcut(QKeySequence::Save);
+    require(!projectWindow->isProjectDirty() && !window->isWindowModified(), "Save shortcut failed");
+    const auto saved = fontu::readProject(initial);
+    require(std::holds_alternative<fontu::ProjectSnapshot>(saved), "saved project did not parse");
+    const auto &loaded = std::get<fontu::ProjectSnapshot>(saved);
+    require(loaded.glyphs.size()==10 && loaded.glyphs[0].shapes.size()==1 && loaded.glyphs[1].shapes.size()==1,
+            "Save omitted another glyph drawing");
+    require(fontu::projectBytes(loaded)==snapshot, "Save changed geometry or metadata");
+    record("Save shortcut writes all ten glyphs and completed cubic; dirty indicator clears");
+    toolbar("Undo"); require(projectWindow->isProjectDirty(), "Undo away from saved content remained clean");
+    toolbar("Redo"); require(!projectWindow->isProjectDirty(), "Redo to saved content remained dirty");
+    const auto copy=output+"/copy.fontu";
+    fileChoice(copy); fileShortcut(QKeySequence::SaveAs);
+    require(projectWindow->projectPath()==copy && !projectWindow->isProjectDirty(), "Save As shortcut failed");
+    record("Save As shortcut selects another file");
+    toolbar("Undo"); const auto unsaved=fontu::projectBytes(canvas->projectSnapshot());
+    fileChoice(initial, [] { prompt(QMessageBox::Cancel); }); fileMenu("openProject");
+    require(fontu::projectBytes(canvas->projectSnapshot())==unsaved && projectWindow->projectPath()==copy,
+            "Cancel on Open changed project");
+    record("File Open and unsaved Cancel preserve completed drawings and filename");
+    fileChoice(initial, [] { prompt(QMessageBox::Discard); }); fileShortcut(QKeySequence::Open);
+    require(fontu::projectBytes(canvas->projectSnapshot())==snapshot && !canvas->canUndo() && !canvas->document().selection(),
+            "Reopen failed to restore drawing or clear transients");
+    record("Reopen restores active glyph, collection, metrics and exact cubic geometry");
+    fileMenu("saveProject"); require(!projectWindow->isProjectDirty(), "File Save failed");
+    const auto third=output+"/menu-copy.fontu";
+    fileChoice(third); fileMenu("saveProjectAs"); require(projectWindow->projectPath()==third, "File Save As failed");
+    record("File menu Save and Save As complete through QAction and QFileDialog");
+    toolbar("Rectangle (R)"); drag(screen({-300,300}),screen({-200,400}));
+    const auto beforeError=fontu::projectBytes(canvas->projectSnapshot());
+    QFile invalid(output+"/invalid.fontu"); require(invalid.open(QIODevice::WriteOnly), "invalid fixture failed");
+    invalid.write("{invalid"); invalid.close();
+    fileChoice(invalid.fileName(), [] { prompt(QMessageBox::Ok); }); fileShortcut(QKeySequence::Open);
+    require(fontu::projectBytes(canvas->projectSnapshot())==beforeError && projectWindow->isProjectDirty(), "invalid Open changed project");
+    record("Invalid Open shows error and preserves dirty drawing");
+    prompt(QMessageBox::Cancel); require(!window->close() && window->isVisible(), "Close Cancel failed");
+    record("Unsaved Close Cancel keeps production window open");
+}
 void run() {
     try {
         for(auto *widget : QApplication::topLevelWidgets()) {
             auto *candidate=qobject_cast<QMainWindow *>(widget);
-            if(candidate && candidate->windowTitle()=="fontu • Shape canvas") window=candidate;
+            if(candidate && qobject_cast<fontu::ProjectWindow *>(candidate)) window=candidate;
         }
         require(window && window->isVisible(),"production window not ready");
         canvas=qobject_cast<fontu::Canvas *>(window->centralWidget());
         require(canvas && canvas->document().shapes().empty(),"doctor: unexpected canvas");
-        require(window->findChild<QToolBar *>() && window->findChild<QToolBar *>()->windowTitle()=="Shape tools" && window->findChild<QToolBar *>()->findChild<QAction *>("snapToGrid") && window->findChild<QToolBar *>()->findChild<QAction *>("snapToGeometry") && window->findChildren<QMenuBar *>().isEmpty(),"doctor: production controls missing");
+        require(window->findChild<QToolBar *>() && window->findChild<QToolBar *>()->windowTitle()=="Shape tools" && window->findChild<QToolBar *>()->findChild<QAction *>("snapToGrid") && window->findChild<QToolBar *>()->findChild<QAction *>("snapToGeometry") && window->findChild<QAction *>("openProject") && window->findChild<QAction *>("saveProject") && window->findChild<QAction *>("saveProjectAs"),"doctor: production controls missing");
         record("Doctor passed: fresh production window, toolbar, Snap controls, empty document");
-        if(feature != "glyph" && feature != "glyphs") {
+        if(feature != "glyph" && feature != "glyphs" && feature != "persistence") {
             window->resize(window->width()+1100-canvas->width(),window->height());
             QApplication::processEvents();
             legacyView();
         }
-        if(feature=="glyphs") {
+        if(feature=="persistence") {
+            persistence();
+        } else if(feature=="glyphs") {
             auto *picker = window->findChild<QListWidget *>("glyphPicker");
             require(picker && picker->count()==10, "glyph picker missing explicit digits");
             require(picker->currentItem()->text()=="0" && canvas->activeGlyphId().value==1, "initial digit selection wrong");
@@ -640,10 +739,15 @@ void run() {
             hover(gridTarget+QPoint(3,2),gridTarget,"Grid drawing before press");
         } else throw std::runtime_error("unknown feature");
         record("PASS: all assertions for " + feature);
+        if (window->isWindowModified()) prompt(QMessageBox::Discard);
         window->close();QApplication::exit(0);
     } catch(const std::exception &error) {
         QFile file(output+"/failure.txt");if(file.open(QIODevice::WriteOnly)) file.write(error.what());
-        if(window) window->close();QApplication::exit(1);
+        if(window) {
+            if (window->isWindowModified()) prompt(QMessageBox::Discard);
+            window->close();
+        }
+        QApplication::exit(1);
     }
 }
 void started() { QTimer::singleShot(0,[] { QTimer::singleShot(50,run); }); }

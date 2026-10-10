@@ -73,14 +73,46 @@ bool Canvas::setActiveGlyph(GlyphId id) {
     update();
     return true;
 }
+ProjectSnapshot Canvas::projectSnapshot() const {
+    ProjectSnapshot result{document().definition(), {}, activeGlyphId()};
+    for (std::size_t i = 0; i < glyphs_.size(); ++i) {
+        const auto &glyph = glyphs_[i];
+        const auto &completed = i == activeGlyphIndex_ && gestureBefore_ ? *gestureBefore_ : glyph.document;
+        result.glyphs.push_back({glyph.seed, completed.shapes()});
+    }
+    return result;
+}
+void Canvas::cancelPendingInput() {
+    cancelGesture();
+    spaceHeld_ = false;
+    gestureButton_ = Qt::NoButton;
+    hoverPosition_.reset();
+    setCursor(tool_ == Tool::Select ? Qt::ArrowCursor : Qt::CrossCursor);
+}
+void Canvas::restoreProject(ProjectSnapshot project) {
+    std::vector<GlyphRecord> replacement;
+    std::size_t activeIndex = 0;
+    for (auto &glyph : project.glyphs) {
+        if (glyph.seed.id == project.activeGlyph) activeIndex = replacement.size();
+        replacement.push_back({std::move(glyph.seed), Document(project.definition, std::move(glyph.shapes)), {}, 0});
+    }
+    cancelPendingInput();
+    glyphs_ = std::move(replacement);
+    activeGlyphIndex_ = activeIndex;
+    resetView();
+    emit glyphsChanged();
+    emit activeGlyphChanged();
+    emit historyChanged();
+    update();
+}
 QString Canvas::controlsHint() const {
     if (tool_ == Tool::Pen) {
         return (penDraft_.size() >= 3
-            ? QStringLiteral("Click first anchor to fill • Enter for open path")
-            : QStringLiteral("Click anchors • Enter for open path"))
-            + QStringLiteral(" • Drag later anchors to curve • Esc cancels • Wheel zooms • Space+drag pans");
+            ? QStringLiteral("Click first anchor to fill • Enter finishes")
+            : QStringLiteral("Click anchors • Enter finishes"))
+            + QStringLiteral(" • Drag to curve • Esc cancels • Wheel zooms • Space+drag pans");
     }
-    return QStringLiteral("Drag draws or moves • Handles resize • Delete removes selection • Esc cancels or clears • Wheel zooms • Space+drag pans");
+    return QStringLiteral("Drag draws or moves • Handles resize • Delete selection • Esc cancels • Wheel zooms • Space+drag pans");
 }
 void Canvas::recordEdit(Document before) {
     const auto &oldShapes = before.shapes();
@@ -521,8 +553,9 @@ void Canvas::mouseReleaseEvent(QMouseEvent *event) {
         if (screenBounds.width() >= 3 && screenBounds.height() >= 3)
             activeGlyph().document.select(activeGlyph().document.addPath(preview_));
     }
-    if (gestureBefore_) recordEdit(std::move(*gestureBefore_));
+    auto before = std::move(gestureBefore_);
     gestureBefore_.reset();
+    if (before) recordEdit(std::move(*before));
     gesture_ = Gesture::Idle;
     editingId_.reset();
     originalPath_ = preview_ = {};

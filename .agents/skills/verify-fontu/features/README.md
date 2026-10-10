@@ -6,9 +6,11 @@ Read the matching recipe before running `control-fontu`. Every run starts its ow
 
 Run commands from the repository root. Each named command builds, launches, checks readiness with doctor, exercises its scenario, captures screenshots and state, and cleans up. The helper injects Qt events into the unchanged production window. It does not send native OS input. See [the skill](../SKILL.md) for the evidence contract and cleanup checks.
 
-Each feature entry lists all known user controls, then separates the scripted coverage from the remaining checks. A pass for a shortcut does not prove its toolbar counterpart. Native input, trackpad, and focus behavior remain separate checks. There is no saving or font export in this milestone. Undo and Redo restore completed canvas edits and individual vertices in unfinished Pen paths.
+Each feature entry lists all known user controls, then separates the scripted coverage from the remaining checks. A pass for a shortcut does not prove its toolbar counterpart. Native input, trackpad, and focus behavior remain separate checks. Project saving is available. Font export remains absent. Undo and Redo restore completed canvas edits and individual vertices in unfinished Pen paths.
 
 ## Features
+
+- [Project persistence](persistence.md) covers File actions, standard shortcuts, temporary file dialogs, all-glyph vector round trips, dirty Undo and Redo, invalid Open, and canceled transitions.
 
 - [Digit glyph selection](glyphs.md) covers the right-side picker, initial digit 0, per-glyph drawings and histories, canceled drafts and gestures, and scrolling at smaller height.
 

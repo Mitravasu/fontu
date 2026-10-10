@@ -94,3 +94,46 @@ The workspace regression proof is `/private/tmp/fontu-digits-workspace-20261009-
 The first digit proof failed an incorrect recipe assumption that ten 48-pixel rows overflow at a 600-pixel window height. They fit. The corrected 500-pixel fixture demonstrates scrolling. The first history run reached a legacy Pen input at x=960 beyond the newly narrower canvas. The legacy fixture now preserves its original canvas area. Both failed runs retained evidence and cleaned up their processes. No production workaround was needed.
 
 The proofs use Qt event injection into the unchanged production main window with the offscreen backend. Native macOS input, trackpad delivery, and desktop focus remain unverified. Arbitrary 80-glyph collection scrolling and stable non-row IDs have event-driven widget coverage. The collection remains in memory with fixed contents. No splash screen, configurable coverage, persistence, or export was added. No commit, rebase, or PR was made by this owner.
+
+## Project saving and reopening
+
+This slice delivers File Open, Save, and Save As with Qt standard platform shortcuts. It stores the entire ordered glyph collection in readable, versioned `.fontu` JSON, including stable IDs, labels, vector paths, fill rules, paint, workspace bounds, typography guides, units per em, and active glyph metadata. The window owns the current filename and canonical saved baseline. Dirty content covers all glyphs and shared settings. View changes and transient editing state do not mark content dirty. Undo back to saved content becomes clean.
+
+### Feature and architect checkpoints
+
+1. `how` over the affected subsystem. Complete. Independent readers traced Document geometry, Canvas glyph records and history, transient gesture mutation, picker population, and production window composition.
+2. `architect` for parallel design exploration. Complete. Snapshot plus Canvas ownership was compared against an external Project session owner. The existing owner was retained to avoid new lifetime and history binding rules.
+3. Write the throughput checkpoint as four todo items.
+   - Blocking first steps. Complete. Inspect current tree, confirm baseline, trace completed versus transient geometry, and choose the typed persistence model before implementation.
+   - Independent workstreams. Read-only design candidates and independent reviewers ran separately. One owner changed source and drove Qt verification.
+   - Shared mutable state. Canvas remains the glyph editing owner. ProjectWindow owns file lifecycle. The codec validates complete input before either owner changes state.
+   - Smallest safe decomposition. One implementation owner maintained the coupled snapshot, dirty comparison, dialogs, actions, picker replacement, and close gate.
+4. Delegate code-writing to a subagent using your configured feature model. Complete. Parent delegated to this implementation owner. Independent review found and verified corrections.
+5. Verify on the matching surface. Complete. Four CTest suites and the production persistence and status recipes pass. Final evidence is recorded below.
+6. Rebase into small, ordered commits. Stack follow-ups. skip: User requested no commit or rebase.
+7. If the design is contested, `interrogate` before shipping. skip: Both design readers and independent final review agreed on the chosen ownership. No shipping requested.
+8. Run **Opening a PR**. skip: User requested no PR.
+
+Architect Ground, Sketch, Agree, and Implement are complete. Scrap remains the response if the chosen shape requires repeated special cases. The synthesis and format contract are [project-persistence-design.md](project-persistence-design.md).
+
+### Decisions and corrections
+
+First Save starts in the platform Documents folder's `fontu` subfolder. It creates the directory before opening the native-capable dialog. Canceling can leave an empty folder. A nonexistent folder cannot be a reliable QFileDialog start directory. Independent review reproduced Qt silently falling back to the working directory. The corrected window test asserts the actual dialog directory with a temporary preferred folder.
+
+Independent review found imported IDs near the uint64 maximum could produce unreadable or duplicate successor IDs. The allocator now skips occupied identities and the reserved maximum on every addition. The sparse-ID regression reopens, allocates IDs 2 and 4 around existing IDs 1 and 3, saves, and reopens again.
+
+Integration found a real dirty-indicator timing bug. Mouse release published history while its transient snapshot contained moved-from data. The release now clears that snapshot before publishing the completed edit. A first modal test timeout came from selecting a directory instead of a filename. Another came from scheduling a response before a shortcut activation event pump. The tests now select legitimate files and wait for the expected modal widget.
+
+File actions cancel unfinished input, consistent with switching and focus loss. Their tooltips state the policy. Open validates first, then uses Save, Discard, or Cancel. Canceling or failing Save prevents replacement or Close. Failed writes preserve the current filename, baseline, and completed content. QSaveFile performs the atomic commit.
+
+The title and status bar show dirty content. Direct screenshot inspection at 800 pixels found the permanent status label overlapped the old hint. Shorter hints preserve the main controls, and the status recipe now checks text width against the permanent label rather than the full status bar.
+
+### Final evidence
+
+Fresh build and `ctest --test-dir /private/tmp/fontu-persistence-build --output-on-failure` pass core, project, project_window, and canvas suites. `git diff --check` is clean.
+
+The final persistence proof is `/private/tmp/fontu-persistence-proof-20261010-05`. The final status regression proof is `/private/tmp/fontu-persistence-status-20261010-03`. Both end in PASS with exit zero, child reaping, scratch removal, and retained evidence. Direct inspection confirms the dirty label in persistence `28.png`, Saved in `12.png`, File actions and shortcuts in `17-menu.png`, and separated hints and dirty label at 800 pixels in status `40.png`. The persistence proof drives all three File actions and their standard shortcuts, saves separate glyph drawings including a cubic Pen stroke, reopens exact geometry and settings, checks dirty Undo and Redo, cancels unsaved Open and Close, and rejects invalid JSON without changing completed work.
+
+First Save's exact default folder, automatic suffix, canceled saving, failed saving, and Save on Close use event-driven window tests with an injected temporary folder. The production recipe first opens a temporary project and writes only inside its evidence directory. It does not create the user's Documents folder for proof.
+
+The proofs inject Qt events into the unchanged production main window with the offscreen backend. Native OS input, macOS global menu delivery, native dialog appearance, trackpad delivery, and desktop focus remain unverified. Projects reopen without transient selections, drafts, or undo history. No autosave, recent files, startup screen, export, commit, rebase, or PR was added.

@@ -26,6 +26,9 @@ On Linux, run `./build/fontu`. On Windows, run `build/Debug/fontu.exe` or the ex
 
 | Action | Control |
 | --- | --- |
+| Open project | File menu or the platform Open shortcut, Command+O on macOS and Ctrl+O elsewhere |
+| Save project | File menu or Command+S on macOS and Ctrl+S elsewhere |
+| Save project as | File menu or the platform Save As shortcut |
 | Select tool | Toolbar or V |
 | Rectangle tool | Toolbar or R |
 | Ellipse tool | Toolbar or E |
@@ -59,6 +62,14 @@ Losing canvas focus, changing tools, resizing the canvas, or resetting the view 
 
 Snapping starts with both options off. Enable either option or both in the toolbar's Snap group. Drawing snaps the start and end points; pen anchors and dragged handle endpoints use the same targets; moving snaps the shape's bounds corners, edge midpoints, or center; resizing snaps the dragged handle while keeping the opposite bounds fixed. Targets must be within eight logical screen pixels, so zoom does not change the capture distance. Grid targets use the visible adaptive grid intersections. Edge handles snap to grid lines on their adjustable axis. Shape geometry targets include actual path outlines and bounds snap points. An amber circle marks the winning target during a gesture. Changing a snap option cancels an unfinished edit.
 
+## Save and reopen a project
+
+Use **File > Save** to save the entire glyph collection as a `.fontu` project. First Save opens the platform Documents folder's `fontu` subfolder. The app creates that folder when the first Save dialog opens. Later saves use the same filename. **Save As** selects another file. **Open** restores the collection, drawings, shared document bounds, typography guides, units per em, and active glyph. Reopened projects start with empty Undo and Redo history.
+
+The title marks unsaved content with an asterisk, and the status bar shows **Unsaved changes**. Undo back to the saved content clears the indicator. Open and Close ask whether to Save, Discard, or Cancel. Canceling or failing to save retains the current project. Invalid project files show an error without replacing completed work.
+
+File actions cancel unfinished Pen drafts and roll back unfinished pointer edits. Finish a Pen path before saving. Tool changes, selection, snapping, pan, and zoom do not mark a project dirty. See [the project persistence design](docs/project-persistence-design.md) for the versioned format and validation rules.
+
 ## Architecture
 
 - `src/document.*` owns ordered shapes, stable IDs, and single selection. Each shape records whether it is filled or stroked. Shape geometry is a `QPainterPath` containing lines and cubic curves, with no widget or screen coordinates. Geometry functions construct and transform paths.
@@ -66,6 +77,8 @@ Snapping starts with both options off. Enable either option or both in the toolb
 - `src/canvas.*` paints paths, an adaptive grid, and fixed-screen-size handles, and handles gestures. Move/resize updates derive from the original path snapshot. Pen drafts store document-space anchors and tangents until committed. Canvas owns stable glyph records, each with its own Document, before/after snapshots, and history cursor. A single active record drives rendering and editing.
 - `src/snapping.*` queries grid and path targets in screen space, excludes the edited shape by ID, and returns the nearest eligible target.
 - `src/glyph_panel.*` derives a scrolling glyph picker from Canvas metadata and keeps its selected row synchronized.
+- `src/project.*` defines typed project snapshots, validates versioned JSON, and writes atomically with QSaveFile.
+- `src/project_window.*` owns File actions, dialogs, the saved baseline, dirty indicators, and Open and Close gates.
 - `src/snap_menu.*` adds the two independent toolbar snap actions; `src/main.cpp` creates the native window and tool actions.
 
 The [typography domain reference](docs/typography_domain_reference.md) defines font terminology. The [terminology audit](docs/terminology-audit.md) records how it applies to the current canvas.
@@ -76,12 +89,14 @@ See [the milestone design](docs/milestone-1-design.md) for decisions and the com
 
 `core_tests` checks normalized bounds, ellipse containment, curve preservation, movement and resizing, document selection/deletion, stacking-order hit testing, inverse coordinate mapping, and zoom limits and anchors. Snapping checks cover adaptive grid spacing, the fixed screen tolerance, nearest-target selection, exact ties, shape exclusion, curve targets, and constrained outline intersections.
 
+`project_tests` checks exact collection and geometry round trips, custom metrics, large stable IDs, malformed files, unknown versions, optional metadata, and file errors. `project_window_tests` drives Qt dialogs and shortcuts with temporary folders. It checks dirty indicators, Undo and Redo to the saved state, picker replacement, invalid Open, canceled transitions, and failed Save.
+
 `canvas_tests` sends mouse, wheel, and keyboard events to the actual widget. It checks drawing, tiny/cancelled drags, overlapping selection, moving, deleting, every resize handle, crossing the resize anchor, off-center handle presses, pan/zoom followed by editing, view reset, Escape/tool-change cancellation, and focus-loss rollback. Snapping cases cover toolbar keyboard/action activation and all toggle states, snapped drawing/moving/resizing, off-center handles, curve outlines, side-handle constraints, self-exclusion, competing grid/geometry targets, zoom/pan mapping, and toggle-change rollback. Pen cases cover straight and cubic segments, exact controls, commit timing, cancellation, snapped anchors and handles, draft navigation, stroke hit testing, and horizontal/vertical movement and resizing. Closing cases check filled triangles, curved closing segments, interior selection and movement, the minimum anchor count, screen capture distance, closure after zoom and pan, and draft cleanup. CTest runs this suite with Qt's offscreen backend.
 
 The canvas suite also passed with the native macOS Qt backend, and a rendered canvas image was inspected. Native test windows do not take desktop focus because the tests inject Qt events directly; focus loss is tested explicitly. Desktop UI automation was unavailable because Computer Use permissions were not granted, so an OS-driven mouse/keyboard walkthrough remains unverified.
 
 ## Current limitations
 
-The document is session-only. There is no saving or autosave. Closing the window loses its shapes and edit history. Undo and Redo restore completed drawings, Pen paths, moves, resizes and deletions. A new edit clears the redo branch. Selection, tools, snapping and navigation do not add history. During an unfinished Pen path, Undo removes one vertex and Redo restores it with its tangent handles. A fully undone draft keeps Redo available and blocks document Undo until Escape or a tool switch cancels it. A new vertex replaces draft redo. Enter or click closure commits the visible draft as one edit. Undo or Redo cancels other unfinished gestures before restoring a completed edit. History stores document snapshots in memory without a size limit. Selection is limited to one shape. Resizing uses axis-aligned bounds. There is no rotation, node editing, independent pen handles, Shape Builder, or font export in this milestone. Pen handles cannot be edited after committing a path.
+Projects save completed drawings and shared settings. There is no autosave. Undo history remains session-only. Undo and Redo restore completed drawings, Pen paths, moves, resizes and deletions. A new edit clears the redo branch. Selection, tools, snapping and navigation do not add history. During an unfinished Pen path, Undo removes one vertex and Redo restores it with its tangent handles. A fully undone draft keeps Redo available and blocks document Undo until Escape or a tool switch cancels it. A new vertex replaces draft redo. Enter or click closure commits the visible draft as one edit. Undo or Redo cancels other unfinished gestures before restoring a completed edit. History stores document snapshots in memory without a size limit. Selection is limited to one shape. Resizing uses axis-aligned bounds. There is no rotation, node editing, independent pen handles, Shape Builder, or font export in this milestone. Pen handles cannot be edited after committing a path.
 
 Geometry snap queries use Qt's screen-space polygon approximation of curves. Stored paths retain their cubic segments. This is suitable for interactive canvas snapping, not exact curve intersections or font construction. Bounds snap points include points inside shapes and ellipse bounds corners, which can also be snap targets.

@@ -36,7 +36,9 @@ Create a selectable glyph collection from the chosen coverage. Preserve each gly
 
 ## Milestone 4. Project metrics and persistence
 
-Move shared guides and UPM into font-wide project settings. Add glyph advance width and derived sidebearings without tying spacing changes to workspace size. Define how changing workspace bounds affects existing outlines before supporting that operation. Add save and reopen behavior that preserves guide settings, coverage, glyph geometry, and spacing. The broader [font studio proposal](font_studio_proposal.md) governs preview, components, kerning, and export beyond this flow.
+The save and reopen slice is implemented. File actions preserve the ordered collection, every completed drawing, stable IDs, labels, shared guide definition, workspace bounds, and UPM in versioned `.fontu` JSON. Dirty indicators and Save, Discard, or Cancel gates protect completed work. See [the persistence design](project-persistence-design.md).
+
+An editor for shared guides and UPM remains planned. Add glyph advance width and derived sidebearings without tying spacing changes to workspace size. Define how changing workspace bounds affects existing outlines before supporting that operation. Add save and reopen behavior that preserves guide settings, coverage, glyph geometry, and spacing. The broader [font studio proposal](font_studio_proposal.md) governs preview, components, kerning, and export beyond this flow.
 
 ## Current verification evidence
 

@@ -1,4 +1,4 @@
-#include "canvas.h"
+#include "project_window.h"
 #include "snap_menu.h"
 #include "glyph_panel.h"
 #include <QActionGroup>
@@ -10,10 +10,8 @@
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName("fontu");
-    QMainWindow window;
-    window.setWindowTitle("fontu • Shape canvas");
-    auto *canvas = new fontu::Canvas;
-    window.setCentralWidget(canvas);
+    fontu::ProjectWindow window;
+    auto *canvas = &window.canvas();
     fontu::addGlyphPanel(window, *canvas);
     auto *toolbar = window.addToolBar("Shape tools");
     toolbar->setMovable(false);

@@ -3,6 +3,7 @@
 #include <QTransform>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace fontu {
 namespace {
@@ -85,6 +86,10 @@ QPainterPath resized(const QPainterPath &path, const QRectF &bounds) {
     transform.translate(-source.x(), -source.y());
     return transform.map(path);
 }
+Document::Document(GlyphDocumentDefinition definition, std::vector<Shape> shapes)
+    : definition_(definition), shapes_(std::move(shapes)) {
+    for (const auto &shape : shapes_) nextId_ = std::max(nextId_, shape.id + 1);
+}
 const Shape *Document::find(ShapeId id) const {
     const auto it = std::find_if(shapes_.begin(), shapes_.end(),
                                  [id](const Shape &shape) { return shape.id == id; });
@@ -92,6 +97,9 @@ const Shape *Document::find(ShapeId id) const {
 }
 std::optional<ShapeId> Document::addPath(const QPainterPath &path, ShapePaint paint) {
     if (!validPath(path) || !withinBounds(path, definition_.bounds)) return {};
+    while (nextId_ == std::numeric_limits<ShapeId>::max() || find(nextId_)) {
+        nextId_ = nextId_ == std::numeric_limits<ShapeId>::max() ? 1 : nextId_ + 1;
+    }
     const auto id = nextId_++;
     shapes_.push_back({id, path, paint});
     return id;

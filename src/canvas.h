@@ -1,5 +1,5 @@
 #pragma once
-#include "document.h"
+#include "project.h"
 #include "viewport.h"
 #include "snapping.h"
 #include <QWidget>
@@ -7,11 +7,6 @@
 #include <utility>
 
 namespace fontu {
-struct GlyphId {
-    std::uint64_t value;
-    friend bool operator==(GlyphId a, GlyphId b) { return a.value == b.value; }
-};
-struct GlyphSeed { GlyphId id; QString label; };
 std::vector<GlyphSeed> digitGlyphs();
 enum class Tool { Select, Rectangle, Ellipse, Pen };
 class Canvas : public QWidget {
@@ -23,6 +18,9 @@ public:
     std::vector<GlyphSeed> glyphs() const;
     GlyphId activeGlyphId() const { return activeGlyph().seed.id; }
     bool setActiveGlyph(GlyphId id);
+    ProjectSnapshot projectSnapshot() const;
+    void restoreProject(ProjectSnapshot project);
+    void cancelPendingInput();
     const Viewport &viewport() const { return viewport_; }
     Tool tool() const { return tool_; }
     QString controlsHint() const;
@@ -38,6 +36,7 @@ public:
     void setGeometrySnapEnabled(bool enabled);
 signals:
     void activeGlyphChanged();
+    void glyphsChanged();
     void toolChanged(Tool tool);
     void snapOptionsChanged();
     void historyChanged();

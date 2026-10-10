@@ -33,6 +33,8 @@ struct GlyphDocumentDefinition {
 
 class Document {
 public:
+    Document() = default;
+    Document(GlyphDocumentDefinition definition, std::vector<Shape> shapes);
     const GlyphDocumentDefinition &definition() const { return definition_; }
     const std::vector<Shape> &shapes() const { return shapes_; }
     const Shape *find(ShapeId id) const;
