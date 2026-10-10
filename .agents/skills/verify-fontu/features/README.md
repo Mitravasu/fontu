@@ -1,0 +1,20 @@
+# fontu verification map
+
+Read the matching recipe before running `control-fontu`. Every run starts its own fresh production window with Qt's offscreen backend. The controller owns its process and private build directory. The user's desktop app remains untouched. Each proof directory must be new.
+
+## Driving conventions
+
+Run commands from the repository root. Each named command builds, launches, checks readiness with doctor, exercises its scenario, captures screenshots and state, and cleans up. The helper injects Qt events into the unchanged production window. It does not send native OS input. See [the skill](../SKILL.md) for the evidence contract and cleanup checks.
+
+Each feature entry lists all known user controls, then separates the scripted coverage from the remaining checks. A pass for a shortcut does not prove its toolbar counterpart. Native-menu, trackpad, and focus behavior remain separate checks. There is no saving, undo, or font export in this milestone.
+
+## Features
+
+- [Drawing shapes](drawing.md) covers Rectangle and Ellipse toolbar/keyboard selection, drags, tiny-drag rejection, and Escape cancellation.
+- [Selecting and editing](editing.md) covers Select toolbar/keyboard, move, one corner resize, deselection, Delete, and Backspace. It lists remaining handle and rollback checks.
+- [Navigating the canvas](navigation.md) covers wheel events, both pan controls, and both Reset view controls. Native trackpad delivery remains unverified.
+- [Snapping](snapping.md) covers the two Snap menu checkboxes and all four toggle combinations. Geometry effects require additional recipes.
+
+## Proof reporting
+
+Name the feature, exact entry points driven, evidence directory, backend, asserted result, and cleanup result. Retain action records with before/after screenshots. Read `run.json` after teardown and confirm the proof still exists. Do not report an unimplemented map check as covered by standalone-widget tests.

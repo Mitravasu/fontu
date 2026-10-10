@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Build and drive one owned, offscreen production window; preserve its proof."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import time
+
+parser = argparse.ArgumentParser()
+parser.add_argument('feature', choices=['drawing', 'editing', 'navigation', 'snapping'])
+parser.add_argument('--evidence', required=True, type=Path)
+parser.add_argument('--qt-prefix', default='/opt/homebrew/opt/qt')
+args = parser.parse_args()
+helpers = Path(__file__).resolve().parent
+source = helpers.parents[3]
+evidence = args.evidence.resolve()
+evidence.mkdir(parents=True, exist_ok=False)
+metadata = {'feature': args.feature, 'source': str(source), 'backend': 'offscreen',
+            'boundary': 'Qt event injection into unchanged src/main.cpp production window; native OS input unverified',
+            'source_sha256': {str(p.relative_to(source)): hashlib.sha256(p.read_bytes()).hexdigest()
+                              for p in sorted((source / 'src').glob('*')) if p.is_file()}}
+metadata_path = evidence / 'run.json'
+metadata_path.write_text(json.dumps(metadata, indent=2) + '\n')
+child = None
+status = 1
+with tempfile.TemporaryDirectory(prefix='fontu-verify-') as scratch:
+    scratch = str(Path(scratch).resolve())
+    try:
+        with (evidence / 'build.log').open('w') as log:
+            subprocess.run(['cmake', '-S', str(helpers), '-B', scratch,
+                            '-DFONTU_SOURCE=' + str(source), '-DCMAKE_PREFIX_PATH=' + args.qt_prefix],
+                           stdout=log, stderr=subprocess.STDOUT, check=True, timeout=120)
+            subprocess.run(['cmake', '--build', scratch, '--target', 'fontu_ui_verify', '--parallel'],
+                           stdout=log, stderr=subprocess.STDOUT, check=True, timeout=120)
+        env = os.environ.copy()
+        env.update(QT_QPA_PLATFORM='offscreen', FONTU_VERIFY_FEATURE=args.feature,
+                   FONTU_VERIFY_EVIDENCE=str(evidence))
+        with (evidence / 'app.log').open('w') as log:
+            child = subprocess.Popen([str(Path(scratch) / 'fontu_ui_verify')], env=env,
+                                     stdout=log, stderr=subprocess.STDOUT)
+            metadata.update(pid=child.pid, executable=str(Path(scratch) / 'fontu_ui_verify'))
+            metadata_path.write_text(json.dumps(metadata, indent=2) + '\n')
+            status = child.wait(timeout=30)
+        actions = (evidence / 'actions.jsonl').read_text().splitlines()
+        assert actions and json.loads(actions[0])['action'].startswith('Doctor passed'), 'doctor missing'
+        assert status == 0 and json.loads(actions[-1])['action'].startswith('PASS:'), 'drive failed'
+    except (Exception, KeyboardInterrupt) as error:
+        (evidence / 'controller-failure.txt').write_text(str(error) + '\n')
+        status = 1
+    finally:
+        if child and child.poll() is None:
+            child.terminate()
+            try:
+                child.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=3)
+        metadata.update(exit_code=status, child_started=child is not None, child_reaped=child is None or child.poll() is not None)
+metadata.update(scratch_removed=not Path(scratch).exists(), evidence_preserved=evidence.exists(),
+                screenshot_count=len(list(evidence.glob('*.png'))))
+metadata_path.write_text(json.dumps(metadata, indent=2) + '\n')
+print(json.dumps({'exit_code': status, 'evidence': str(evidence), 'cleanup': metadata['child_reaped'],
+                  'scratch_removed': metadata['scratch_removed'], 'screenshots': metadata['screenshot_count']}))
+raise SystemExit(status)
