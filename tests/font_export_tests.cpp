@@ -40,8 +40,14 @@ QByteArray table(const QByteArray &font, const char *tag) {
     }
     return {};
 }
+QByteArray encoded(const FontDescription &font) { return std::get<QByteArray>(fontBytes(font, FontFormat::Otf)); }
+ProjectSnapshot labelled(const std::vector<char32_t> &codes) {
+    std::vector<ProjectGlyph> glyphs;
+    for (const auto code : codes) glyphs.push_back({{{glyphs.size() + 1}, QString::fromUcs4(&code, 1)}, {}});
+    return project(std::move(glyphs));
+}
 QByteArray rectangleFont() {
-    return fontBytes(described(project({{{{1}, "A"}, {filled(1, makeShape(ShapeKind::Rectangle, {0, 0, 20, 30}))}}})).font, FontFormat::Otf);
+    return std::get<QByteArray>(fontBytes(described(project({{{{1}, "A"}, {filled(1, makeShape(ShapeKind::Rectangle, {0, 0, 20, 30}))}}})).font, FontFormat::Otf));
 }
 QPoint at(FontPoint point) { return {point.x, point.y}; }
 QList<QPoint> ends(const Contour &contour) {
@@ -151,7 +157,7 @@ private slots:
     void widestDrawingAreaKeepsMetricsInRange() {
         auto p = project({{{{1}, "A"}, {filled(1, makeShape(ShapeKind::Rectangle, {-24574.5, 0, 100, 30}))}}});
         p.definition.bounds = QRectF(-8191.5, -250, 16383, 1000);
-        const auto bytes = fontBytes(described(p).font, FontFormat::Otf);
+        const auto bytes = encoded(described(p).font);
         QCOMPARE(table(bytes, "head").mid(36, 8), QByteArray::fromHex("c001" "0000" "3999" "02bc"));
         QCOMPARE(table(bytes, "hhea").mid(10, 8), QByteArray::fromHex("3fff" "c001" "0666" "3999"));
         QCOMPARE(table(bytes, "OS/2").mid(2, 2), QByteArray::fromHex("3fff"));
@@ -196,10 +202,38 @@ private slots:
     }
     void cmapAddsFormat12AboveTheBmp() {
         const auto font = described(project({{{{1}, QString::fromUcs4(U"\U0001F600", 1)}, {}}})).font;
-        const auto cmap = table(fontBytes(font, FontFormat::Otf), "cmap");
+        const auto cmap = table(encoded(font), "cmap");
         QCOMPARE(cmap.left(36), QByteArray::fromHex(
             "0000" "0004" "00000003" "00000024" "00000004" "0000003c" "00030001" "00000024" "0003000a" "0000003c"));
         QCOMPARE(cmap.mid(0x3c), QByteArray::fromHex("000c" "0000" "0000001c" "00000000" "00000001" "0001f600" "0001f600" "00000001"));
+    }
+    void shuffledLabelsResolveThroughTheCharacterMap() {
+        std::vector<char32_t> codes;
+        for (char32_t code = U'A'; code <= U'Z'; ++code) codes.push_back(code);
+        for (char32_t i = 0; i < 9000; ++i) codes.push_back(0x4E00 + i * 7919 % 9000);
+        for (char32_t i = 0; i < 100; ++i) codes.push_back(0xAC00 + 5 * i);
+        QTemporaryDir directory;
+        const auto path = directory.filePath("Shuffled.otf");
+        QVERIFY(std::holds_alternative<FontExportReport>(exportFont(path, labelled(codes), settings(), FontFormat::Otf)));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto cmap = table(file.readAll(), "cmap");
+        const int subtable = int(bigEndian32(cmap, 8));
+        QCOMPARE(cmap.mid(subtable, 4), QByteArray::fromHex("0004" "4998"));
+        QCOMPARE(cmap.size() - subtable, 18840);
+        QRawFont raw(path, 1000, QFont::PreferNoHinting);
+        int wrong = 0;
+        for (std::size_t i = 0; i < codes.size(); ++i)
+            if (raw.glyphIndexesForString(QString::fromUcs4(&codes[i], 1)) != QList<quint32>{quint32(i + 1)}) ++wrong;
+        QCOMPARE(wrong, 0);
+        QCOMPARE(raw.glyphIndexesForString(QString::fromUcs4(U"\uAC01", 1)), QList<quint32>{0});
+    }
+    void characterMapBeyondTheFormat4LimitIsAnExportError() {
+        std::vector<char32_t> codes;
+        for (char32_t i = 0; i < 8200; ++i) codes.push_back(0x100 + 5 * i);
+        QCOMPARE(std::get<QString>(fontBytes(described(labelled(codes)).font, FontFormat::Otf)),
+                 QString("The glyph labels below U+10000 are too scattered to fit an OpenType character map. "
+                         "Remove some labels or group them into consecutive characters."));
     }
     void headAndHmtxCarryMetrics() {
         const auto bytes = rectangleFont();

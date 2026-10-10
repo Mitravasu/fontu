@@ -105,11 +105,6 @@ Measurements measure(const FontDescription &font) {
     return m;
 }
 
-struct TableInput {
-    const FontDescription &font;
-    const Measurements &m;
-};
-
 struct Run {
     char32_t firstCode;
     char32_t lastCode;
@@ -125,28 +120,76 @@ std::vector<Run> runs(const std::map<char32_t, GlyphIndex> &characterMap, char32
     }
     return result;
 }
-QByteArray cmapFormat4(const std::map<char32_t, GlyphIndex> &characterMap) {
-    auto segments = runs(characterMap, 0xFFFE);
-    segments.push_back({0xFFFF, 0xFFFF, 0});
+struct Segment {
+    char32_t firstCode;
+    std::vector<GlyphIndex> glyphs;
+    char32_t lastCode() const { return firstCode + char32_t(glyphs.size()) - 1; }
+    bool sequential() const {
+        for (std::size_t i = 0; i < glyphs.size(); ++i)
+            if (glyphs[i] == 0 || glyphs[i] != glyphs[0] + i) return false;
+        return true;
+    }
+};
+std::vector<Segment> bmpSegments(const std::map<char32_t, GlyphIndex> &characterMap) {
+    constexpr std::size_t segmentHeaderBytes = 8;
+    std::vector<Segment> segments;
+    for (const auto &run : runs(characterMap, 0xFFFE)) {
+        const std::size_t length = run.lastCode - run.firstCode + 1;
+        if (!segments.empty()) {
+            auto &last = segments.back();
+            const std::size_t gap = run.firstCode - last.lastCode() - 1;
+            if (2 * (gap + length + (last.sequential() ? last.glyphs.size() : 0)) < segmentHeaderBytes) {
+                last.glyphs.insert(last.glyphs.end(), gap, 0);
+                for (std::size_t i = 0; i < length; ++i) last.glyphs.push_back(GlyphIndex(run.firstGlyph + i));
+                continue;
+            }
+        }
+        Segment segment{run.firstCode, {}};
+        for (std::size_t i = 0; i < length; ++i) segment.glyphs.push_back(GlyphIndex(run.firstGlyph + i));
+        segments.push_back(std::move(segment));
+    }
+    segments.push_back({0xFFFF, {0}});
+    return segments;
+}
+std::optional<QByteArray> cmapFormat4(const std::map<char32_t, GlyphIndex> &characterMap) {
+    const auto segments = bmpSegments(characterMap);
     const int count = int(segments.size());
     int searchRange = 2, entrySelector = 0;
     while (searchRange * 2 <= count * 2) {
         searchRange *= 2;
         ++entrySelector;
     }
+    std::vector<GlyphIndex> glyphIdArray;
+    QByteArray deltas, rangeOffsets;
+    for (int i = 0; i < count; ++i) {
+        const auto &s = segments[std::size_t(i)];
+        if (s.firstCode == 0xFFFF) {
+            u16(deltas, 1);
+            u16(rangeOffsets, 0);
+        } else if (s.sequential()) {
+            u16(deltas, std::uint16_t(s.glyphs[0] - s.firstCode));
+            u16(rangeOffsets, 0);
+        } else {
+            u16(deltas, 0);
+            u16(rangeOffsets, std::uint32_t(2 * (count - i + glyphIdArray.size())));
+            glyphIdArray.insert(glyphIdArray.end(), s.glyphs.begin(), s.glyphs.end());
+        }
+    }
+    const auto length = 16 + 8 * std::size_t(count) + 2 * glyphIdArray.size();
+    if (length > 0xFFFF) return {};
     QByteArray out;
     u16(out, 4);
-    u16(out, 16 + 8 * count);
+    u16(out, std::uint32_t(length));
     u16(out, 0);
     u16(out, 2 * count);
     u16(out, searchRange);
     u16(out, entrySelector);
     u16(out, 2 * count - searchRange);
-    for (const auto &s : segments) u16(out, s.lastCode);
+    for (const auto &s : segments) u16(out, s.lastCode());
     u16(out, 0);
     for (const auto &s : segments) u16(out, s.firstCode);
-    for (const auto &s : segments) u16(out, s.lastCode == 0xFFFF ? 1 : std::uint16_t(s.firstGlyph - s.firstCode));
-    for (std::size_t i = 0; i < segments.size(); ++i) u16(out, 0);
+    out += deltas + rangeOffsets;
+    for (const auto glyph : glyphIdArray) u16(out, glyph);
     return out;
 }
 QByteArray cmapFormat12(const std::map<char32_t, GlyphIndex> &characterMap) {
@@ -164,10 +207,17 @@ QByteArray cmapFormat12(const std::map<char32_t, GlyphIndex> &characterMap) {
     }
     return out;
 }
+
+struct TableInput {
+    const FontDescription &font;
+    const Measurements &m;
+    const QByteArray &cmapFormat4;
+};
+
 QByteArray cmapTable(const TableInput &in) {
     const auto &map = in.font.characterMap;
     const bool supplementary = !map.empty() && map.rbegin()->first > 0xFFFF;
-    const auto bmp = cmapFormat4(map);
+    const auto &bmp = in.cmapFormat4;
     const auto full = supplementary ? cmapFormat12(map) : QByteArray();
     const std::uint32_t records = supplementary ? 4 : 2;
     const std::uint32_t bmpOffset = 4 + 8 * records, fullOffset = bmpOffset + std::uint32_t(bmp.size());
@@ -543,9 +593,13 @@ QByteArray assembleSfnt(std::uint32_t sfntVersion, std::vector<std::pair<Tag, QB
 }
 }
 
-QByteArray fontBytes(const FontDescription &font, FontFormat format) {
+FontBytesResult fontBytes(const FontDescription &font, FontFormat format) {
+    const auto bmp = cmapFormat4(font.characterMap);
+    if (!bmp)
+        return QString("The glyph labels below U+10000 are too scattered to fit an OpenType character map. "
+                       "Remove some labels or group them into consecutive characters.");
     const auto measurements = measure(font);
-    const TableInput input{font, measurements};
+    const TableInput input{font, measurements, *bmp};
     const auto &f = flavor(format);
     std::vector<std::pair<Tag, QByteArray>> tables;
     for (const auto &entry : f.tables) tables.emplace_back(entry.tag, entry.build(input));
@@ -556,7 +610,9 @@ FontExportResult exportFont(const QString &path, const ProjectSnapshot &project,
     auto described = describeFont(project, settings);
     if (const auto *error = std::get_if<QString>(&described)) return *error;
     auto &result = std::get<DescribedFont>(described);
-    const auto bytes = fontBytes(result.font, format);
+    const auto encoded = fontBytes(result.font, format);
+    if (const auto *error = std::get_if<QString>(&encoded)) return *error;
+    const auto &bytes = std::get<QByteArray>(encoded);
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) return file.errorString();
     if (file.write(bytes) != bytes.size()) return file.errorString();

@@ -9,7 +9,8 @@ namespace fontu {
 
 enum class FontFormat { Otf };
 
-QByteArray fontBytes(const FontDescription &font, FontFormat format);
+using FontBytesResult = std::variant<QByteArray, QString>;
+FontBytesResult fontBytes(const FontDescription &font, FontFormat format);
 
 struct FontExportReport {
     std::size_t glyphCount;
