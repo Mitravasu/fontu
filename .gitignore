@@ -1,4 +1,5 @@
 /build*/
 /dist/
+/.audit/
 __pycache__/
 .DS_Store

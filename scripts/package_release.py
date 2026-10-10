@@ -68,6 +68,9 @@ def verify_macos_dependencies(app):
         identities = subprocess.check_output(["otool", "-D", str(binary)], text=True).splitlines()[1:]
         dependencies = subprocess.check_output(["otool", "-L", str(binary)], text=True).splitlines()[1:]
         for line in dependencies:
+            # Universal binaries have an unindented header for each architecture.
+            if not line.startswith("\t"):
+                continue
             dependency = line.strip().split(" (")[0]
             if dependency in identities or not dependency.startswith("/"):
                 continue

@@ -12,7 +12,7 @@ for key in list(environment):
     if key.startswith(("QT_", "QML", "DYLD_")) or key in ("LD_LIBRARY_PATH", "QTDIR"):
         del environment[key]
 if sys.platform == "win32":
-    system = Path(environment["SystemRoot"])
+    system = Path(environment["SYSTEMROOT"])
     environment["PATH"] = os.pathsep.join([str(system / "System32"), str(system)])
 else:
     environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
