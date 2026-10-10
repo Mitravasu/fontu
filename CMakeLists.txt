@@ -12,10 +12,18 @@ target_link_libraries(fontu_canvas PUBLIC fontu_core Qt6::Widgets)
 add_executable(fontu MACOSX_BUNDLE src/main.cpp)
 target_link_libraries(fontu PRIVATE fontu_canvas)
 set_target_properties(fontu PROPERTIES
+    WIN32_EXECUTABLE TRUE
     MACOSX_BUNDLE_GUI_IDENTIFIER "org.fontu.canvas"
     MACOSX_BUNDLE_BUNDLE_NAME "fontu"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
     MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}")
+install(TARGETS fontu BUNDLE DESTINATION . RUNTIME DESTINATION bin)
+install(FILES LICENSE DESTINATION share/licenses/fontu)
+if(UNIX AND NOT APPLE)
+    install(FILES packaging/fontu.desktop DESTINATION share/applications)
+    install(FILES packaging/fontu.svg DESTINATION share/icons/hicolor/scalable/apps)
+endif()
+file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/release-version.txt" CONTENT "${PROJECT_VERSION}\n")
 include(CTest)
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)

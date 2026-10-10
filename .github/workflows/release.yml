@@ -1,0 +1,125 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  QT_VERSION: '6.8.3'
+
+jobs:
+  build:
+    name: Build, test and package (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            os: macos-15
+            qt-host: mac
+            qt-arch: clang_64
+            preset: release-macos
+          - platform: windows-x86_64
+            os: windows-2022
+            qt-host: windows
+            qt-arch: win64_msvc2022_64
+            preset: release-windows
+          - platform: linux-x86_64
+            os: ubuntu-22.04
+            qt-host: linux
+            qt-arch: gcc_64
+            preset: release-unix
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install Linux display dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libxcb-cursor0 libxkbcommon-x11-0 libegl1 libopengl0
+      - name: Install Qt
+        uses: jurplel/install-qt-action@d325aaf2a8baeeda41ad0b5d39f84a6af9bcf005 # v4.3.0
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: ${{ matrix.qt-host }}
+          arch: ${{ matrix.qt-arch }}
+          aqtversion: '==3.3.0'
+          py7zrversion: '==0.22.0'
+          cache: true
+      - name: Configure Release build
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Check tag matches project version
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          version = Path('build-release/release-version.txt').read_text().strip()
+          if os.environ['GITHUB_REF_TYPE'] == 'tag':
+              expected = 'v' + version
+              actual = os.environ['GITHUB_REF_NAME']
+              if actual != expected:
+                  raise SystemExit(f'Tag {actual!r} must match CMake project version {expected!r}')
+          PY
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} --parallel 3
+      - name: Run all CTest suites
+        run: ctest --preset ${{ matrix.preset }}
+      - name: Deploy dependencies, smoke test and package
+        run: python scripts/package_release.py
+      - name: Upload package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: FontU-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish complete release
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download all platform packages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: FontU-*
+          path: dist
+          merge-multiple: true
+      - name: Create draft, attach packages and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          packages=(
+            "dist/FontU-${version}-macos-arm64.dmg"
+            "dist/FontU-${version}-windows-x86_64.zip"
+            "dist/FontU-${version}-linux-x86_64.AppImage"
+          )
+          for package in "${packages[@]}"; do test -s "$package"; done
+          # A failed upload leaves only a draft. Reruns may resume that draft.
+          if gh release view "$RELEASE_TAG" --json isDraft > release-state.json 2>/dev/null; then
+            python -c 'import json; assert json.load(open("release-state.json"))["isDraft"], "Release is already published"'
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --generate-notes --title "FontU $RELEASE_TAG"
+          fi
+          gh release upload "$RELEASE_TAG" "${packages[@]}" --clobber
+          gh release edit "$RELEASE_TAG" --draft=false

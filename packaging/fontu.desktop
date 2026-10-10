@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=FontU
+Comment=Create fonts with an editable vector canvas
+Exec=fontu
+Icon=fontu
+Categories=Graphics;VectorGraphics;
+Terminal=false

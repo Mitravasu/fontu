@@ -22,6 +22,8 @@ open build/fontu.app
 
 On Linux, run `./build/fontu`. On Windows, run `build/Debug/fontu.exe` or the executable in your chosen configuration. Qt's libraries and platform plugins must be discoverable. Windows and Linux have not been verified yet. This build is for development, not a standalone distribution package.
 
+The [release pipeline](docs/releases.md) builds and tests macOS, Windows, and Linux packages with bundled Qt dependencies. Manual runs produce downloadable artifacts without publishing. Matching version tags publish all three packages only after every platform succeeds. macOS and Windows packages are unsigned; see the distribution limitations before downloading or publishing.
+
 ## Controls
 
 | Action | Control |
