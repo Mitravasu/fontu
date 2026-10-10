@@ -1,5 +1,6 @@
 #include "project_window.h"
 #include "creation_page.h"
+#include "font_export.h"
 #include "glyph_panel.h"
 #include "snap_menu.h"
 #include <QAction>
@@ -44,12 +45,17 @@ ProjectWindow::ProjectWindow(QWidget *parent, QString projectFolder)
     saveAsAction_ = saveAs;
     saveAs->setObjectName("saveProjectAs");
     saveAs->setShortcuts(QKeySequence::SaveAs);
-    for (auto *action : {newAction, open, save, saveAs})
+    file->addSeparator();
+    auto *exportOtf = exportOtfAction_ = file->addAction("&Export OTF...");
+    exportOtf->setObjectName("exportOtf");
+    exportOtf->setShortcut(QKeySequence("Ctrl+Shift+E"));
+    for (auto *action : {newAction, open, save, saveAs, exportOtf})
         action->setToolTip("File actions cancel unfinished input. Completed drawings are preserved.");
     connect(open, &QAction::triggered, this, &ProjectWindow::openProject);
     connect(newAction, &QAction::triggered, this, &ProjectWindow::newProject);
     connect(save, &QAction::triggered, this, &ProjectWindow::saveProject);
     connect(saveAs, &QAction::triggered, this, &ProjectWindow::saveProjectAs);
+    connect(exportOtf, &QAction::triggered, this, &ProjectWindow::exportFontAs);
     connect(canvas_, &Canvas::historyChanged, this, &ProjectWindow::updateTitle);
     connect(canvas_, &Canvas::glyphsChanged, this, &ProjectWindow::updateTitle);
     connect(creationPage_, &CreationPage::createRequested, this, &ProjectWindow::createFromPage);
@@ -128,6 +134,7 @@ void ProjectWindow::updateEditorActions() {
     redoAction_->setEnabled(editing && canvas_->canRedo());
     saveAction_->setEnabled(editing);
     saveAsAction_->setEnabled(editing);
+    exportOtfAction_->setEnabled(editing);
 }
 void ProjectWindow::showPage(Page page) {
     page_ = page;
@@ -222,6 +229,38 @@ bool ProjectWindow::saveProjectAs() {
     const auto path = dialog.selectedFiles().value(0);
     if (path.isEmpty()) return false;
     return saveTo(path);
+}
+bool ProjectWindow::exportFontAs() {
+    if (!hasProject()) return false;
+    canvas_->cancelPendingInput();
+    const auto folder = path_.isEmpty() ? projectFolder_ : QFileInfo(path_).absolutePath();
+    const auto base = path_.isEmpty() ? QStringLiteral("Untitled") : QFileInfo(path_).completeBaseName();
+    QFileDialog dialog(this, "Export OpenType font", QDir(folder).filePath(base + ".otf"), "OpenType fonts (*.otf)");
+    dialog.setAcceptMode(QFileDialog::AcceptSave);
+    dialog.setFileMode(QFileDialog::AnyFile);
+    dialog.setDefaultSuffix("otf");
+    if (dialog.exec() != QDialog::Accepted) return false;
+    const auto path = dialog.selectedFiles().value(0);
+    if (path.isEmpty()) return false;
+    const FontSettings settings{QFileInfo(path).completeBaseName(), QDateTime::currentDateTimeUtc()};
+    const auto result = exportFont(path, canvas_->projectSnapshot(), settings, FontFormat::Otf);
+    if (const auto *error = std::get_if<QString>(&result)) {
+        showError("Could not export font", *error);
+        return false;
+    }
+    const auto &report = std::get<FontExportReport>(result);
+    statusBar()->showMessage("Exported " + QFileInfo(path).fileName(), 5000);
+    if (!report.warnings.empty()) {
+        QStringList lines;
+        for (const auto &warning : report.warnings) lines << warningText(warning);
+        QMessageBox box(QMessageBox::Warning, "Font exported with warnings",
+                        QString("Exported %1 with %2 warning(s).").arg(QFileInfo(path).fileName()).arg(report.warnings.size()),
+                        QMessageBox::Ok, this);
+        box.setInformativeText(lines.join('\n'));
+        box.exec();
+    }
+    canvas_->setFocus();
+    return true;
 }
 bool ProjectWindow::confirmReplacement() {
     if (!isProjectDirty()) return true;
