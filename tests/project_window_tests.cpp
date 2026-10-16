@@ -1,5 +1,7 @@
 #include "project_window.h"
 #include "glyph_panel.h"
+#include "guide_preview.h"
+#include "project_creation.h"
 #include <QAction>
 #include <QFileDialog>
 #include <QFile>
@@ -7,6 +9,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QComboBox>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
@@ -103,9 +106,9 @@ private slots:
         QVERIFY(!window.hasProject());
         QVERIFY(window.findChild<QLabel *>("creationError")->text().contains("at least one"));
         window.findChild<QLineEdit *>("customCharacters")->setText(QString::fromUtf8("A😀Aé😀 "));
+        window.findChild<QSpinBox *>("unitsPerEm")->setValue(2048);
         window.findChild<QSpinBox *>("workspaceWidth")->setValue(1200);
         window.findChild<QSpinBox *>("workspaceHeight")->setValue(1400);
-        window.findChild<QSpinBox *>("unitsPerEm")->setValue(2048);
         window.findChild<QDoubleSpinBox *>("xHeight")->setValue(480);
         window.findChild<QCheckBox *>("xHeightEnabled")->setChecked(false);
         QTest::mouseClick(create, Qt::LeftButton);
@@ -158,6 +161,104 @@ private slots:
         QVERIFY(window.findChild<QLabel *>("creationError")->text().contains("200000"));
         QVERIFY(window.close());
     }
+    void guidesStayValidWhileEditingAndDragging() {
+        QTemporaryDir directory;
+        ProjectWindow window(nullptr, directory.filePath("fontu"));
+        window.resize(800, 600); window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *preset = window.findChild<QComboBox *>("creationPreset");
+        auto *preview = window.findChild<GuidePreview *>("guidePreview");
+        auto *error = window.findChild<QLabel *>("creationError");
+        auto *note = window.findChild<QLabel *>("guideNote");
+        auto *height = window.findChild<QSpinBox *>("workspaceHeight");
+        auto *upm = window.findChild<QSpinBox *>("unitsPerEm");
+        auto *proportional = window.findChild<QCheckBox *>("keepProportions");
+        const auto value = [&](const char *name) { return window.findChild<QDoubleSpinBox *>(name)->value(); };
+        const auto setGuide = [&](const char *name, double v) { window.findChild<QDoubleSpinBox *>(name)->setValue(v); };
+        const auto choose = [&](int index) { preset->setCurrentIndex(index); emit preset->activated(index); };
+        QVERIFY(preview && preview->isVisible() && proportional->isChecked());
+        // Every preset is valid, and the preview mirrors it.
+        for (int index = 0; index < preset->count(); ++index) {
+            choose(index);
+            const auto &expected = creationPresets()[std::size_t(index)].definition;
+            QCOMPARE(preview->definition().bounds, expected.bounds);
+            QCOMPARE(preview->definition().ascender, expected.ascender);
+            QVERIFY(preview->invalidGuides().isEmpty());
+            QVERIFY(!error->isVisible());
+        }
+        // UPM scales the workspace and guides together: Classic 1000 at 2048 UPM matches the 2048 preset.
+        choose(0);
+        upm->setValue(2048);
+        QCOMPARE(preview->definition().bounds, QRectF(-1024, -512, 2048, 2048));
+        QCOMPARE(value("ascender"), 1536.); QCOMPARE(value("capHeight"), 1434.);
+        QCOMPARE(value("xHeight"), 1024.); QCOMPARE(value("descender"), -512.);
+        upm->setValue(20); upm->setValue(1000); // Scaling works from an anchor, so it never drifts.
+        QCOMPARE(preview->definition().bounds, QRectF(-500, -250, 1000, 1000));
+        QCOMPARE(value("capHeight"), 700.);
+        // Height moves guides proportionally, losslessly.
+        choose(1);
+        height->setValue(4096);
+        QCOMPARE(value("ascender"), 3072.); QCOMPARE(value("capHeight"), 2868.); QCOMPARE(value("descender"), -1024.);
+        height->setValue(16); height->setValue(2048);
+        QCOMPARE(value("ascender"), 1536.); QCOMPARE(value("capHeight"), 1434.);
+        QVERIFY(!validateWorkspace(preview->definition()));
+        // Out-of-workspace typing is clamped with a gentle note, never an error.
+        setGuide("ascender", 1800);
+        QCOMPARE(value("ascender"), 1536.);
+        QVERIFY(note->isVisible() && note->text().contains("Ascender"));
+        QVERIFY(!error->isVisible());
+        // Without proportions, guides hold their values; a smaller workspace limits them only temporarily.
+        proportional->setChecked(false);
+        height->setValue(1000);
+        QCOMPARE(value("ascender"), 750.); QCOMPARE(value("xHeight"), 750.);
+        QVERIFY(note->isVisible() && note->text().contains("Raise Height"));
+        QVERIFY(!validateWorkspace(preview->definition()));
+        height->setValue(2048);
+        QCOMPARE(value("ascender"), 1536.); QCOMPARE(value("xHeight"), 1024.);
+        QVERIFY(!note->isVisible());
+        proportional->setChecked(true);
+        // Only contradictory order blocks, naming and highlighting the fields; the label is not clipped.
+        setGuide("ascender", 1400);
+        QVERIFY(error->isVisible());
+        QVERIFY(error->text().startsWith("Cap height (1434) is above Ascender (1400)."));
+        QVERIFY(window.findChild<QDoubleSpinBox *>("capHeight")->property("invalid").toBool());
+        QVERIFY(window.findChild<QDoubleSpinBox *>("ascender")->property("invalid").toBool());
+        QCOMPARE(preview->invalidGuides(), QStringList({"Cap height", "Ascender"}));
+        QVERIFY(error->geometry().left() >= 20);
+        QVERIFY(error->mapTo(&window, QPoint(error->width(), 0)).x() <= window.width());
+        QTest::mouseClick(window.findChild<QPushButton *>("createProject"), Qt::LeftButton);
+        QVERIFY(!window.hasProject());
+        setGuide("ascender", 1536);
+        QVERIFY(!error->isVisible());
+        QVERIFY(!window.findChild<QDoubleSpinBox *>("capHeight")->property("invalid").toBool());
+        // Dragging lines in the preview updates fields live and can only produce valid guides.
+        window.findChild<QScrollArea *>("creationScroll")->ensureWidgetVisible(preview);
+        const auto drag = [&](const char *name, double dy) {
+            const auto start = preview->guidePoint(name).toPoint();
+            QTest::mousePress(preview, Qt::LeftButton, {}, start);
+            QTest::mouseMove(preview, start + QPoint(0, int(dy / 2)));
+            QTest::mouseMove(preview, start + QPoint(0, int(dy)));
+            QTest::mouseRelease(preview, Qt::LeftButton, {}, start + QPoint(0, int(dy)));
+        };
+        const double before = value("xHeight");
+        drag("x-height", -10);
+        QVERIFY(value("xHeight") > before && value("xHeight") < value("capHeight"));
+        QCOMPARE(preview->definition().xHeight, value("xHeight"));
+        drag("Ascender", -500);
+        QCOMPARE(value("ascender"), 1536.);
+        drag("x-height", -500);
+        QCOMPARE(value("xHeight"), value("capHeight"));
+        drag("Baseline", 500);
+        QCOMPARE(value("baseline"), value("descender"));
+        drag("Descender", 500);
+        QCOMPARE(value("descender"), -512.);
+        QVERIFY(!validateWorkspace(preview->definition()));
+        QVERIFY(!error->isVisible());
+        window.findChild<QCheckBox *>("ascenderEnabled")->setChecked(false);
+        QVERIFY(!preview->definition().guideEnabled.ascender);
+        QTest::mouseClick(window.findChild<QPushButton *>("createProject"), Qt::LeftButton);
+        QVERIFY(window.hasProject());
+    }
     void newCancellationPreservesHistoryAndDirtyGates() {
         QTemporaryDir directory;
         ProjectWindow window(nullptr, directory.filePath("fontu")); prepare(window);
@@ -171,7 +272,7 @@ private slots:
         const auto undoBinding = QKeySequence::keyBindings(QKeySequence::Undo).front()[0];
         QTest::keyClick(create, Qt::Key(undoBinding.key()), undoBinding.keyboardModifiers());
         QCOMPARE(projectBytes(window.canvas().projectSnapshot()), before);
-        window.findChild<QDoubleSpinBox *>("ascender")->setValue(900);
+        window.findChild<QDoubleSpinBox *>("ascender")->setValue(600); // Below cap height: contradictory, so blocked.
         QTest::mouseClick(create, Qt::LeftButton);
         QVERIFY(window.findChild<QLabel *>("creationError")->text().contains("Ascender"));
         QCOMPARE(projectBytes(window.canvas().projectSnapshot()), before);

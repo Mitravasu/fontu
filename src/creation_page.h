@@ -9,12 +9,14 @@ class QComboBox;
 class QLineEdit;
 class QLabel;
 class QPushButton;
+namespace fontu { class GuidePreview; }
 namespace fontu {
 class CreationPage : public QWidget {
     Q_OBJECT
 public:
     explicit CreationPage(QWidget *parent = nullptr);
     ProjectCreationDefinition request() const;
+    GlyphDocumentDefinition definition() const;
     void showError(const CreationError &error);
     void setCanCancel(bool enabled);
 signals:
@@ -25,6 +27,20 @@ private:
     void applyPreset(int index);
     void updateSpan();
     void updateCoverage();
+    void refreshGuides();
+    void setError(const QString &message, bool workspace = false);
+    void dimensionsEdited();
+    void unitsPerEmEdited();
+    void guideEdited(std::size_t index);
+    void guideDragged(const QString &name, double value);
+    void proportionalToggled(bool on);
+    void syncGuides();
+    void rebaseGuides();
+    void setGuideValue(std::size_t index, double value);
+    // A guide value as the user last set it, with the workspace height at that moment.
+    // Displayed values derive from these so shrinking then growing the workspace is lossless.
+    struct GuideIntent { double value = 0; int height = 0; };
+    struct DimensionAnchor { int width = 0, height = 0, unitsPerEm = 0; };
     QSpinBox *width_;
     QSpinBox *height_;
     QSpinBox *unitsPerEm_;
@@ -38,5 +54,12 @@ private:
     QLabel *coverageDescription_;
     QLabel *error_;
     QPushButton *cancel_;
+    GuidePreview *preview_ = nullptr;
+    QCheckBox *proportional_ = nullptr;
+    QLabel *guideNote_ = nullptr;
+    std::array<GuideIntent, 5> intent_{};
+    DimensionAnchor anchor_;
+    bool syncing_ = false;
+    bool workspaceError_ = false;
 };
 }

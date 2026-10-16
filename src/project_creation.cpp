@@ -1,4 +1,5 @@
 #include "project_creation.h"
+#include <algorithm>
 #include <cmath>
 #include <unordered_set>
 
@@ -41,8 +42,19 @@ QString characterCoverageDescription(BuiltinCharacters characters) {
     }
     return {};
 }
-ProjectCreationResult createProject(const ProjectCreationDefinition &request) {
-    const auto &d = request.definition;
+namespace {
+QString units(double value) { return QString::number(value, 'g', 12); }
+QString joinNames(const QStringList &names) {
+    if (names.size() < 2) return names.join(QString());
+    return QStringList(names.mid(0, names.size() - 1)).join(", ") + " and " + names.back();
+}
+QString listGuides(const std::vector<TypographyGuide> &guides) {
+    QStringList parts;
+    for (const auto &guide : guides) parts << QString::fromUtf8(guide.name) + " (" + units(guide.position) + ")";
+    return joinNames(parts);
+}
+}
+std::optional<CreationError> validateWorkspace(const GlyphDocumentDefinition &d) {
     const auto wholeUnit = [](double value) {
         return std::isfinite(value) && value >= 16 && value <= 16384 && std::floor(value) == value;
     };
@@ -52,12 +64,55 @@ ProjectCreationResult createProject(const ProjectCreationDefinition &request) {
         return CreationError{CreationField::Dimensions, "Width and height must be whole font units from 16 to 8192."};
     if (!wholeUnit(d.unitsPerEm))
         return CreationError{CreationField::UnitsPerEm, "Units per em must be a whole number from 16 to 16384."};
+    // Bounds are stored Y-up: bounds.top() is the lowest Y and bounds.bottom() the highest.
+    const double low = d.bounds.top(), high = d.bounds.bottom();
+    std::vector<TypographyGuide> above, below;
+    QStringList offending;
+    bool anyDisabled = false;
     for (const auto &guide : d.guides()) {
-        if (!std::isfinite(guide.position) || guide.position < d.bounds.top() || guide.position > d.bounds.bottom())
-            return CreationError{CreationField::Guides, QString::fromUtf8(guide.name) + " must be inside the workspace, even when disabled."};
+        if (!std::isfinite(guide.position))
+            return CreationError{CreationField::Guides, QString::fromUtf8(guide.name) + " must be a finite number.", {QString::fromUtf8(guide.name)}};
+        if (guide.position >= low && guide.position <= high) continue;
+        (guide.position > high ? above : below).push_back(guide);
+        offending << QString::fromUtf8(guide.name);
+        anyDisabled = anyDisabled || !guide.enabled;
     }
-    if (!(d.descender <= d.baseline && d.baseline <= d.xHeight && d.xHeight <= d.capHeight && d.capHeight <= d.ascender))
-        return CreationError{CreationField::Guides, "Guide values must be ordered. Descender ≤ baseline ≤ x-height ≤ cap height ≤ ascender."};
+    if (!offending.isEmpty()) {
+        // The workspace spans -height/4 to 3*height/4, so a taller workspace can always reach further.
+        double neededHeight = d.bounds.height();
+        for (const auto &guide : above) neededHeight = std::max(neededHeight, std::ceil(guide.position / .75));
+        for (const auto &guide : below) neededHeight = std::max(neededHeight, std::ceil(-guide.position * 4));
+        QStringList sentences;
+        const auto plural = [](const std::vector<TypographyGuide> &g) { return g.size() > 1; };
+        if (!above.empty())
+            sentences << listGuides(above) + (plural(above) ? " are" : " is") + " above the workspace top (" + units(high) + ").";
+        if (!below.empty())
+            sentences << listGuides(below) + (plural(below) ? " are" : " is") + " below the workspace bottom (" + units(low) + ").";
+        const QString guideWord = offending.size() > 1 ? "those guides" : offending.front();
+        if (neededHeight <= 8192)
+            sentences << "Raise Height to at least " + units(neededHeight) + " units, or move " + guideWord + " inside "
+                + units(low) + " to " + units(high) + ".";
+        else
+            sentences << "Move " + guideWord + " inside " + units(low) + " to " + units(high) + ".";
+        if (anyDisabled) sentences << "Unchecked guides must fit too, because their values are kept in the project.";
+        return CreationError{CreationField::Guides, sentences.join(' '), offending};
+    }
+    const std::array<std::pair<const char *, double>, 5> ordered{{{"Descender", d.descender}, {"Baseline", d.baseline},
+        {"x-height", d.xHeight}, {"Cap height", d.capHeight}, {"Ascender", d.ascender}}};
+    for (std::size_t i = 0; i + 1 < ordered.size(); ++i) {
+        const auto &[lowerName, lower] = ordered[i];
+        const auto &[upperName, upper] = ordered[i + 1];
+        if (lower <= upper) continue;
+        return CreationError{CreationField::Guides,
+            QString("%1 (%2) is above %3 (%4). Guides must stay in order from bottom to top: Descender ≤ Baseline ≤ x-height ≤ Cap height ≤ Ascender.")
+                .arg(QString::fromUtf8(lowerName), units(lower), QString::fromUtf8(upperName), units(upper)),
+            {QString::fromUtf8(lowerName), QString::fromUtf8(upperName)}};
+    }
+    return std::nullopt;
+}
+ProjectCreationResult createProject(const ProjectCreationDefinition &request) {
+    const auto &d = request.definition;
+    if (auto error = validateWorkspace(d)) return *error;
     const auto text = std::holds_alternative<CustomCharacters>(request.coverage)
         ? std::get<CustomCharacters>(request.coverage).text : builtinCharacterText(std::get<BuiltinCharacters>(request.coverage));
     if (text.isEmpty()) return CreationError{CreationField::Characters, "Enter at least one custom character."};

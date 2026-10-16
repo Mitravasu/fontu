@@ -1,4 +1,5 @@
 #include "canvas.h"
+#include "guide_preview.h"
 #include "project_creation.h"
 #include <QFocusEvent>
 #include <QKeyEvent>
@@ -310,12 +311,15 @@ void Canvas::paintEvent(QPaintEvent *) {
     for (const auto &guide : definition.guides()) {
         if (!guide.enabled) continue;
         const auto y = viewport_.toScreen({0, guide.position}).y();
-        const bool baseline = guide.position == definition.baseline;
-        QPen pen(baseline ? QColor("#5c6a91") : QColor("#a7b2c8"), baseline ? 1.5 : 1);
+        // Same per-guide colours as the creation preview; baseline solid, the rest dashed.
+        const QString name = QString::fromUtf8(guide.name);
+        const bool baseline = name == "Baseline";
+        const QColor color = guideColor(name);
+        QPen pen(color, baseline ? 1.5 : 1);
         pen.setStyle(baseline ? Qt::SolidLine : Qt::DashLine);
         painter.setPen(pen);
         painter.drawLine(QPointF(page.left(), y), QPointF(page.right(), y));
-        painter.setPen(QColor("#48566f"));
+        painter.setPen(color.darker(135));
         const auto labelX = std::clamp(page.left() + 8, 8.0, std::max(8.0, width() - 170.0));
         if (y >= 12 && y <= height() - 18)
             painter.drawText(QPointF(labelX, y - 5), QString::fromUtf8(guide.name) + " " + QString::number(guide.position));

@@ -1,6 +1,7 @@
 #include "canvas.h"
 #include "snap_menu.h"
 #include "glyph_panel.h"
+#include "guide_preview.h"
 #include <QMainWindow>
 #include <QListWidget>
 #include <QScrollBar>
@@ -83,6 +84,27 @@ private slots:
             QVERIFY(!canvas.canUndo());
             canvas.setRenderMode(RenderMode::XRay);
             QCOMPARE(canvas.grab().toImage().pixelColor(point({-170,150})), before.pixelColor(point({-170,150})));
+        }
+    }
+    void guidesUseSharedPreviewColours() {
+        Canvas canvas({{{1}, "H"}});
+        canvas.setAttribute(Qt::WA_ShowWithoutActivating);
+        canvas.resize(800, 600); canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        canvas.resetView(); QApplication::processEvents();
+        QVERIFY(canvas.referenceVisible());
+        const auto image = canvas.grab().toImage();
+        const auto &definition = canvas.document().definition();
+        for (const auto &guide : definition.guides()) {
+            const auto y = canvas.viewport().toScreen({0, guide.position}).toPoint().y();
+            const auto left = canvas.viewport().toScreen({definition.bounds.left(), 0}).toPoint().x();
+            const auto right = canvas.viewport().toScreen({definition.bounds.right(), 0}).toPoint().x();
+            const auto colour = guideColor(QString::fromUtf8(guide.name));
+            int count = 0;
+            for (int x = std::max(0, left); x < std::min(image.width(), right); ++x)
+                for (int line = y - 1; line <= y + 1; ++line)
+                    if (line >= 0 && line < image.height() && image.pixelColor(x, line) == colour) ++count;
+            QVERIFY2(y > 0 && y < image.height() && count > 40, guide.name);
         }
     }
     void referenceGlyphFollowsMetricsAndStaysVisualOnly() {
