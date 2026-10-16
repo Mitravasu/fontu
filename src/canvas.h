@@ -3,6 +3,7 @@
 #include "viewport.h"
 #include "snapping.h"
 #include "shape_builder.h"
+#include "reference_glyph.h"
 #include <QWidget>
 #include <array>
 #include <utility>
@@ -27,6 +28,11 @@ public:
     Tool tool() const { return tool_; }
     RenderMode renderMode() const { return renderMode_; }
     void setRenderMode(RenderMode mode);
+    bool referenceVisible() const { return referenceVisible_; }
+    void setReferenceVisible(bool visible);
+    const QFont &referenceFont() const { return referenceFont_; }
+    void setReferenceFont(const QFont &font);
+    const QPainterPath &referencePath() const { return reference_; }
     QString controlsHint() const;
     void setTool(Tool tool);
     void resetView();
@@ -43,6 +49,7 @@ signals:
     void glyphsChanged();
     void toolChanged(Tool tool);
     void renderModeChanged(RenderMode mode);
+    void referenceVisibilityChanged(bool visible);
     void snapOptionsChanged();
     void historyChanged();
     void controlsHintChanged(const QString &hint);
@@ -61,6 +68,7 @@ private:
     enum class Gesture { Idle, Draw, Move, Resize, Pan, PenAnchor, Build };
     void cancelGesture();
     void refreshBuilder();
+    void refreshReference();
     void extendBuilder(const QPointF &point);
     struct BuilderGesture {
         BuilderOperation operation;
@@ -103,6 +111,9 @@ private:
     Viewport viewport_;
     Tool tool_ = Tool::Select;
     RenderMode renderMode_ = RenderMode::XRay;
+    bool referenceVisible_ = true;
+    QFont referenceFont_ = defaultReferenceFont();
+    QPainterPath reference_;
     Gesture gesture_ = Gesture::Idle;
     bool spaceHeld_ = false;
     bool viewInitialized_ = false;

@@ -85,6 +85,46 @@ private slots:
             QCOMPARE(canvas.grab().toImage().pixelColor(point({-170,150})), before.pixelColor(point({-170,150})));
         }
     }
+    void referenceGlyphFollowsMetricsAndStaysVisualOnly() {
+        Canvas canvas({{{1}, "H"}, {{2}, "zero"}});
+        prepare(canvas);
+        const auto path = canvas.referencePath();
+        const auto bounds = path.boundingRect();
+        QVERIFY(std::abs(bounds.bottom() - 700) < 2);
+        QVERIFY(std::abs(bounds.top()) < 2);
+        QVERIFY(std::abs(bounds.center().x()) < 50);
+        const QPointF stem(bounds.left() + 20, 150);
+        QVERIFY(path.contains(stem));
+        const auto bytes = projectBytes(canvas.projectSnapshot());
+        const auto pixel = [&canvas](QPointF p) {
+            return canvas.grab().toImage().pixelColor(canvas.viewport().toScreen(p).toPoint());
+        };
+        const auto shown = pixel(stem);
+        const auto paper = pixel({bounds.center().x(), 150});
+        QVERIFY(shown.lightness() < paper.lightness());
+        canvas.setReferenceVisible(false);
+        QCOMPARE(pixel(stem), paper);
+        canvas.setReferenceVisible(true);
+        canvas.setGeometrySnapEnabled(true);
+        canvas.setTool(Tool::Rectangle);
+        const auto edge = canvas.viewport().toScreen({bounds.left(), 150}).toPoint();
+        movePointer(canvas, edge + QPoint(3, 0));
+        QVERIFY(canvas.rect().contains(edge));
+        QVERIFY(!markerAt(canvas, edge));
+        zoom(canvas, {300, 300}, 240);
+        drag(canvas, {400, 300}, {350, 260}, Qt::MiddleButton);
+        QVERIFY(canvas.rect().contains(canvas.viewport().toScreen(stem).toPoint()));
+        QCOMPARE(pixel(stem), shown);
+        canvas.setTool(Tool::Select);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, canvas.viewport().toScreen(stem).toPoint());
+        QVERIFY(canvas.document().shapes().empty());
+        QVERIFY(!canvas.document().selection());
+        QCOMPARE(projectBytes(canvas.projectSnapshot()), bytes);
+        QVERIFY(canvas.setActiveGlyph({2}));
+        QVERIFY(canvas.referencePath().isEmpty());
+        QVERIFY(canvas.setActiveGlyph({1}));
+        QCOMPARE(canvas.referencePath(), path);
+    }
     void moveAndResizeAcquireGuideIntersection() {
         Canvas canvas;
         prepare(canvas);

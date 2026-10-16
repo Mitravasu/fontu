@@ -127,6 +127,22 @@ private slots:
         QCOMPARE(projectBytes(reopened.canvas().projectSnapshot()), projectBytes(window.canvas().projectSnapshot()));
         QVERIFY(reopened.close()); QVERIFY(window.close());
     }
+    void referenceGlyphToggleIsViewOnly() {
+        QTemporaryDir directory;
+        ProjectWindow window(nullptr, directory.filePath("fontu"));
+        prepare(window);
+        auto *reference = window.findChild<QAction *>("referenceGlyph");
+        QVERIFY(reference && reference->isCheckable() && reference->isEnabled());
+        QVERIFY(reference->isChecked() && window.canvas().referenceVisible());
+        QVERIFY(!window.canvas().referencePath().isEmpty());
+        reference->trigger();
+        QVERIFY(!window.canvas().referenceVisible());
+        QVERIFY(!window.isProjectDirty());
+        QVERIFY(!window.canvas().canUndo());
+        window.canvas().setReferenceVisible(true);
+        QVERIFY(reference->isChecked());
+        QVERIFY(window.close());
+    }
     void oversizedCustomPasteIsRejected() {
         QTemporaryDir directory;
         ProjectWindow window(nullptr, directory.filePath("fontu"));

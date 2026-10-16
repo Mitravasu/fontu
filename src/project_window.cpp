@@ -120,6 +120,17 @@ void ProjectWindow::setupEditorChrome() {
     QObject::connect(canvas, &Canvas::renderModeChanged, opaque, [opaque](RenderMode mode) {
         opaque->setChecked(mode == RenderMode::Opaque);
     });
+    auto *reference = toolbar->addAction("Reference glyph");
+    reference->setObjectName("referenceGlyph");
+    reference->setCheckable(true);
+    reference->setChecked(canvas->referenceVisible());
+    reference->setToolTip("Show the character from a system font behind the drawing as a tracing guide.");
+    view->addAction(reference);
+    QObject::connect(reference, &QAction::toggled, canvas, [canvas](bool checked) {
+        canvas->setReferenceVisible(checked);
+        canvas->setFocus();
+    });
+    QObject::connect(canvas, &Canvas::referenceVisibilityChanged, reference, &QAction::setChecked);
     auto *status = statusBar();
     QObject::connect(canvas, &fontu::Canvas::controlsHintChanged, status,
                      [status](const QString &hint) { status->showMessage(hint); });

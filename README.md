@@ -4,9 +4,34 @@ A native Qt 6 / C++ vector canvas for font creation. Milestone 1 supports rectan
 
 The creation page offers example presets, workspace dimensions, independent units per em, and selectable typography guides with editable values. Classic defaults to 1000 by 1000 font units at 1000 UPM. Creation and Reset view fit the document. Drawing and editing stop at its bounds while pan and zoom remain available outside it. See [project creation](docs/project-creation.md) for exact ranges, character coverage, and replacement behavior.
 
+## Quick start
+
+Requires Qt 6 and CMake; see [Build and launch](#build-and-launch) for exact versions. On macOS and Linux, the top-level `Makefile` detects Homebrew Qt automatically with `brew --prefix qt`.
+
+```sh
+make            # configure if needed, then build in parallel
+make run        # build, then launch the app in the foreground
+make test       # build, then run all CTest suites
+make help       # list all targets and variables
+```
+
+| Target | Description |
+| --- | --- |
+| `build` | Build the app and tests in parallel, configuring first if needed. This is the default. |
+| `configure` | Configure the CMake build directory |
+| `run` | Build, then launch the development app in the foreground |
+| `test` | Build, then run `ctest --output-on-failure` |
+| `test-py` | Run the Python packaging tests, as in CI |
+| `clean` | Remove the build directory |
+| `rebuild` | Clean, reconfigure, and build from scratch |
+| `verify` | Run one offscreen verify-fontu recipe and print its evidence directory (`FEATURE=drawing`, `EVIDENCE=<new dir>`) |
+| `help` | List available targets and current variable values |
+
+Override `BUILD_DIR` (default `build`), `BUILD_TYPE` (default `Debug`), `JOBS`, `QT_PREFIX`, or `CMAKE_ARGS`, for example `make BUILD_TYPE=Release`.
+
 ## Build and launch
 
-Requires CMake 3.21+, a C++17 compiler, and Qt 6.4+ with Widgets and Test. Tested on macOS with Qt 6.11.2 and AppleClang 21.
+Requires CMake 3.21+, a C++17 compiler, and Qt 6.4+ with Widgets and Test. Tested on macOS with Qt 6.11.2 and AppleClang 21. Without `make`, or on Windows, use CMake and CTest directly:
 
 ```sh
 cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/Qt
@@ -50,6 +75,7 @@ The [release pipeline](docs/releases.md) builds and tests macOS, Windows, and Li
 | Zoom at pointer | Mouse wheel or vertical trackpad scroll |
 | Pan | Middle-button drag or hold Space and left-drag |
 | Fit the complete document | Reset view toolbar button or 0 |
+| Show or hide the reference glyph | `Reference glyph` toolbar toggle or View menu |
 | Cancel an edit | Escape during a draw, move, resize, or pen draft |
 | Clear selection | Escape when idle or click empty canvas with Select |
 
@@ -58,6 +84,8 @@ Draw several shapes with R and E, switch to V, select and drag a shape, resize i
 With P, click anchors for straight segments. Drag a second or later anchor to curve the incoming and following segments with symmetric handles. The first anchor has no handles. After adding at least three anchors, click within eight logical screen pixels of the first anchor to close and fill the shape immediately. A ring marks the first anchor. Hovering over it previews the filled shape and shows a hand cursor. The closing segment preserves the last anchor's curve handle. Select a closed shape by its interior or outline.
 
 Enter or Return finishes an open stroke with at least two anchors after mouse release. Select open strokes near their outlines. Both finish controls keep the Pen tool active. Hover previews the next segment; it does not add an anchor. Escape discards the entire unfinished path, including between clicks. Horizontal paths have left and right resize handles; vertical paths have top and bottom handles. Resizing preserves their collapsed axis.
+
+A faint reference glyph sits behind each glyph's drawing as a tracing guide. It renders the glyph's single-character label in a system sans-serif (Helvetica, Arial, or DejaVu Sans), with its baseline on the baseline guide, its cap height scaled to the cap-height guide, and its advance centered in the workspace. It is on by default and is view-only: it is never selected, snapped to, saved, or exported. Labels longer than one character show no reference.
 
 Switching glyphs cancels unfinished Pen drafts and geometry gestures. The canvas view, tools, and snapping stay shared. Clicking a glyph row returns keyboard focus to the canvas.
 
@@ -78,6 +106,7 @@ File actions cancel unfinished Pen drafts and roll back unfinished pointer edits
 - `src/document.*` owns ordered shapes, stable IDs, and single selection. Each shape records whether it is filled or stroked. Shape geometry is a `QPainterPath` containing lines and cubic curves, with no widget or screen coordinates. Geometry functions construct and transform paths.
 - `src/viewport.*` maps an unbounded y-up document plane to y-down logical screen pixels, with cursor-anchored zoom. Rendering and input share this mapping.
 - `src/canvas.*` paints paths, an adaptive grid, and fixed-screen-size handles, and handles gestures. Move/resize updates derive from the original path snapshot. Pen drafts store document-space anchors and tangents until committed. Canvas owns stable glyph records, each with its own Document, before/after snapshots, and history cursor. A single active record drives rendering and editing.
+- `src/reference_glyph.*` maps a label's outline from a system font into document space for the canvas tracing reference.
 - `src/snapping.*` queries grid and path targets in screen space, excludes the edited shape by ID, and returns the nearest eligible target.
 - `src/glyph_panel.*` derives a scrolling glyph picker from Canvas metadata and keeps its selected row synchronized.
 - `src/project_creation.*` validates creation settings and builds complete snapshots. `src/creation_page.*` collects workspace, guides, and character choices.
