@@ -201,6 +201,79 @@ private slots:
         QCOMPARE(preserve.find(b)->path, ellipse);
         QCOMPARE(preserve.find(stroke)->paint, ShapePaint::Stroke);
     }
+    void builderReappliesToFragmentsSharingFlattenedCurves_data() {
+        QTest::addColumn<QPointF>("offset");
+        QTest::newRow("aligned") << QPointF(0, 0);
+        QTest::newRow("offset") << QPointF(37.5, 20);
+        QTest::newRow("fractional") << QPointF(61.25, 45.5);
+    }
+    void builderReappliesToFragmentsSharingFlattenedCurves() {
+        QFETCH(QPointF, offset);
+        Document document;
+        document.addPath(makeShape(ShapeKind::Ellipse, {0, 0, 300, 300}));
+        document.addPath(makeShape(ShapeKind::Rectangle, QRectF(QPointF(150, 100) + offset, QSizeF(200, 300))));
+        document.selectAll();
+        ShapeBuilder first(document);
+        const auto rectangleOnly = first.hit(QPointF(330, 380));
+        QVERIFY(rectangleOnly);
+        QVERIFY(first.apply(document, {*rectangleOnly}, BuilderOperation::Combine));
+        // The flattened fragment now shares the ellipse's curved boundary.
+        document.selectAll();
+        ShapeBuilder again(document);
+        for (const auto &region : again.regions()) {
+            QVERIFY(!region.path.isEmpty());
+            QVERIFY(region.path.boundingRect().width() > 1 && region.path.boundingRect().height() > 1);
+        }
+        std::vector<std::size_t> touched;
+        for (const auto point : {QPointF(50, 150), QPointF(330, 380), QPointF(200, 150) + offset})
+            if (const auto index = again.hit(point);
+                index && std::find(touched.begin(), touched.end(), *index) == touched.end())
+                touched.push_back(*index);
+        QVERIFY(again.apply(document, touched, BuilderOperation::Combine));
+        QCOMPARE(document.shapes().size(), std::size_t(1));
+        document.selectAll();
+        ShapeBuilder merged(document);
+        QCOMPARE(merged.regions().size(), std::size_t(1));
+        QCOMPARE(merged.hit({50, 150}), merged.hit({330, 380}));
+    }
+    void builderAbsorbsTangentSlivers_data() {
+        QTest::addColumn<bool>("flattened");
+        QTest::newRow("curve") << false;
+        QTest::newRow("builder output") << true;
+    }
+    void builderAbsorbsTangentSlivers() {
+        QFETCH(bool, flattened);
+        Document document;
+        document.addPath(makeShape(ShapeKind::Ellipse, {0, 0, 200, 200}));
+        if (flattened) {
+            document.selectAll();
+            ShapeBuilder flatten(document);
+            QVERIFY(flatten.apply(document, {0}, BuilderOperation::Combine));
+        }
+        // The stem's edge sits on the bowl's extreme, leaving hairline gaps beside the tangent.
+        document.addPath(makeShape(ShapeKind::Rectangle, {90, 0, 20, 50}));
+        document.selectAll();
+        ShapeBuilder builder(document);
+        for (const auto &region : builder.regions()) {
+            double area = 0;
+            const auto polygons = region.path.toSubpathPolygons();
+            for (int i = 0; i < polygons.size(); ++i) {
+                double contour = 0;
+                for (int j = 1; j < polygons[i].size(); ++j)
+                    contour += polygons[i][j - 1].x() * polygons[i][j].y() - polygons[i][j].x() * polygons[i][j - 1].y();
+                area += (i == 0 ? 0.5 : -0.5) * std::abs(contour);
+            }
+            QVERIFY2(2 * area >= 0.5 * region.path.length(), "Shape Builder offered an untouchable sliver region");
+        }
+        QVERIFY(builder.hit({100, 25}));
+        const auto touched = builder.crossed({20, 25}, {180, 25});
+        QVERIFY(builder.apply(document, touched, BuilderOperation::Combine));
+        QCOMPARE(document.shapes().size(), std::size_t(1));
+        QVERIFY(document.shapes()[0].path.contains({100, 0.2}));
+        document.selectAll();
+        ShapeBuilder merged(document);
+        QCOMPARE(merged.regions().size(), std::size_t(1));
+    }
     void boundedDocumentAdmission() {
         Document document;
         const auto id = document.addPath(makeShape(ShapeKind::Rectangle, {400, -250, 100, 100}));

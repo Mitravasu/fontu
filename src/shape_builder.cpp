@@ -4,10 +4,43 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 
 namespace fontu {
 namespace {
 constexpr double geometryScale = 16;
+// Regions thinner than this many document units are boolean noise, not ink.
+constexpr double degenerateWidth = 1e-6;
+// Visible but untouchable slivers (near-tangent or near-coincident edges, flattened
+// curves) are absorbed into a neighbouring region instead of becoming stray shapes.
+constexpr double sliverWidth = 0.5;
+double polygonArea(const QPolygonF &polygon) {
+    double area = 0;
+    for (int i = 1; i < polygon.size(); ++i)
+        area += polygon[i - 1].x() * polygon[i].y() - polygon[i].x() * polygon[i - 1].y();
+    if (!polygon.empty() && polygon.front() != polygon.back())
+        area += polygon.back().x() * polygon.front().y() - polygon.front().x() * polygon.back().y();
+    return area / 2;
+}
+double polygonLength(const QPolygonF &polygon) {
+    double length = 0;
+    for (int i = 1; i < polygon.size(); ++i) length += QLineF(polygon[i - 1], polygon[i]).length();
+    if (!polygon.empty()) length += QLineF(polygon.back(), polygon.front()).length();
+    return length;
+}
+// Width of a long thin piece: 2 * area / perimeter.
+bool thinnerThan(double area, double perimeter, double width) { return 2 * std::abs(area) < width * perimeter; }
+struct Extent { double area = 0, perimeter = 0; };
+// A region is an outer contour followed by its holes.
+Extent extent(const QPainterPath &region) {
+    Extent result;
+    const auto polygons = region.toSubpathPolygons();
+    for (int i = 0; i < polygons.size(); ++i) {
+        result.area += (i == 0 ? 1 : -1) * std::abs(polygonArea(polygons[i]));
+        result.perimeter += polygonLength(polygons[i]);
+    }
+    return result;
+}
 QPainterPath canonicalVertices(QPainterPath path) {
     constexpr double precision = 1e9;
     for (int i = 0; i < path.elementCount(); ++i) {
@@ -40,6 +73,9 @@ QPainterPath canonicalVertices(QPainterPath path) {
             break;
         }
         if (end - begin < 3) continue;
+        QPolygonF loop;
+        for (auto i = begin; i < end; ++i) loop.push_back(vertices[i]);
+        if (thinnerThan(polygonArea(loop), polygonLength(loop), degenerateWidth)) continue;
         boundary.moveTo(vertices[begin]);
         for (auto i = begin + 1; i < end; ++i) boundary.lineTo(vertices[i]);
         boundary.closeSubpath();
@@ -104,10 +140,9 @@ std::vector<QPainterPath> components(const QPainterPath &path) {
     std::vector<double> areas;
     std::vector<QPointF> witnesses;
     for (const auto &polygon : loops) {
-        double area = 0;
-        for (int i = 1; i < polygon.size(); ++i)
-            area += polygon[i - 1].x() * polygon[i].y() - polygon[i].x() * polygon[i - 1].y();
-        if (std::abs(area) < 1e-9) continue;
+        const auto area = polygonArea(polygon);
+        // Coincident edges make Qt emit zero-area retraced spikes; they are not regions.
+        if (std::abs(area) < 1e-9 || thinnerThan(area, polygonLength(polygon), degenerateWidth * geometryScale)) continue;
         QPainterPath contour;
         contour.addPolygon(polygon);
         contour.closeSubpath();
@@ -138,6 +173,39 @@ std::vector<QPainterPath> components(const QPainterPath &path) {
 }
 void appendRegions(std::vector<ShapeRegion> &output, const QPainterPath &path, const std::vector<ShapeId> &sources) {
     for (auto &piece : components(path)) output.push_back({std::move(piece), sources});
+}
+// Merges each sliver into the neighbour it shares the longest boundary with. The
+// result covers both, so its sources are the union of theirs.
+void absorbSlivers(std::vector<ShapeRegion> &regions, double width) {
+    for (bool absorbed = true; absorbed;) {
+        absorbed = false;
+        for (std::size_t i = 0; i < regions.size() && !absorbed; ++i) {
+            const auto sliver = extent(regions[i].path);
+            if (!thinnerThan(sliver.area, sliver.perimeter, width)) continue;
+            const auto reach = regions[i].path.boundingRect().adjusted(-width, -width, width, width);
+            std::optional<std::size_t> neighbour;
+            QPainterPath joined;
+            double longestShared = 0;
+            for (std::size_t j = 0; j < regions.size(); ++j) {
+                if (j == i || !reach.intersects(regions[j].path.boundingRect())) continue;
+                auto pieces = components(regions[j].path.united(regions[i].path));
+                if (pieces.size() != 1) continue;
+                const auto shared = sliver.perimeter + extent(regions[j].path).perimeter - extent(pieces[0]).perimeter;
+                if (shared <= longestShared) continue;
+                longestShared = shared;
+                neighbour = j;
+                joined = std::move(pieces[0]);
+            }
+            if (!neighbour) continue;
+            auto &target = regions[*neighbour];
+            target.path = std::move(joined);
+            for (const auto id : regions[i].sources)
+                if (std::find(target.sources.begin(), target.sources.end(), id) == target.sources.end())
+                    target.sources.push_back(id);
+            regions.erase(regions.begin() + std::ptrdiff_t(i));
+            absorbed = true;
+        }
+    }
 }
 bool crossesInterior(const QPainterPath &path, const QPointF &from, const QPointF &to) {
     if (from == to) return path.contains(from);
@@ -187,8 +255,13 @@ ShapeBuilder::ShapeBuilder(const Document &document) {
         appendRegions(partition, uncovered, {shape.id});
         regions_ = std::move(partition);
     }
+    absorbSlivers(regions_, sliverWidth * geometryScale);
     const auto inverse = QTransform::fromScale(1 / geometryScale, 1 / geometryScale);
     for (auto &region : regions_) region.path = canonicalVertices(inverse.map(region.path));
+    // An empty region can be neither hit nor written back, so it must not exist.
+    regions_.erase(std::remove_if(regions_.begin(), regions_.end(),
+                                  [](const ShapeRegion &region) { return region.path.isEmpty(); }),
+                   regions_.end());
 }
 std::optional<std::size_t> ShapeBuilder::hit(const QPointF &point) const {
     for (std::size_t i = 0; i < regions_.size(); ++i)

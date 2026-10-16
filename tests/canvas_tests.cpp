@@ -237,6 +237,31 @@ private slots:
         QVERIFY(canvas.setActiveGlyph({1}));
         QCOMPARE(canvas.document().shapes()[0].path, original[0].path);
     }
+    void builderMergesItsOwnCurvedFragmentsAgain() {
+        Canvas canvas;
+        prepare(canvas);
+        QTest::keyClick(&canvas, Qt::Key_E);
+        drag(canvas, {100, 100}, {300, 300});
+        QTest::keyClick(&canvas, Qt::Key_R);
+        drag(canvas, {225, 167}, {358, 367});
+        QTest::keyClick(&canvas, Qt::Key_V);
+        QTest::keyClick(&canvas, Qt::Key_A, Qt::ControlModifier);
+        QTest::keyClick(&canvas, Qt::Key_B);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {340, 350});
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(2));
+        // The fragment's flattened arc now coincides with the ellipse outline.
+        QTest::keyClick(&canvas, Qt::Key_A, Qt::ControlModifier);
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::NoModifier, {130, 200});
+        movePointer(canvas, {260, 230});
+        movePointer(canvas, {340, 350});
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::NoModifier, {340, 350});
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(1));
+        const auto &merged = canvas.document().shapes()[0].path;
+        for (const QPoint point : {QPoint(130, 200), QPoint(260, 230), QPoint(340, 350)})
+            QVERIFY(merged.contains(canvas.viewport().toDocument(point)));
+        canvas.undo();
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(2));
+    }
     void glyphDrawingsHistoryAndSelectionStayIndependent() {
         Canvas canvas({{{42}, "zero"}, {{900}, "alternate one"}});
         prepare(canvas);
