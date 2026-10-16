@@ -1,6 +1,7 @@
 #include "canvas.h"
 #include "snap_menu.h"
 #include "glyph_panel.h"
+#include "guide_preview.h"
 #include <QMainWindow>
 #include <QListWidget>
 #include <QScrollBar>
@@ -84,6 +85,67 @@ private slots:
             canvas.setRenderMode(RenderMode::XRay);
             QCOMPARE(canvas.grab().toImage().pixelColor(point({-170,150})), before.pixelColor(point({-170,150})));
         }
+    }
+    void guidesUseSharedPreviewColours() {
+        Canvas canvas({{{1}, "H"}});
+        canvas.setAttribute(Qt::WA_ShowWithoutActivating);
+        canvas.resize(800, 600); canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        canvas.resetView(); QApplication::processEvents();
+        QVERIFY(canvas.referenceVisible());
+        const auto image = canvas.grab().toImage();
+        const auto &definition = canvas.document().definition();
+        for (const auto &guide : definition.guides()) {
+            const auto y = canvas.viewport().toScreen({0, guide.position}).toPoint().y();
+            const auto left = canvas.viewport().toScreen({definition.bounds.left(), 0}).toPoint().x();
+            const auto right = canvas.viewport().toScreen({definition.bounds.right(), 0}).toPoint().x();
+            const auto colour = guideColor(QString::fromUtf8(guide.name));
+            int count = 0;
+            for (int x = std::max(0, left); x < std::min(image.width(), right); ++x)
+                for (int line = y - 1; line <= y + 1; ++line)
+                    if (line >= 0 && line < image.height() && image.pixelColor(x, line) == colour) ++count;
+            QVERIFY2(y > 0 && y < image.height() && count > 40, guide.name);
+        }
+    }
+    void referenceGlyphFollowsMetricsAndStaysVisualOnly() {
+        Canvas canvas({{{1}, "H"}, {{2}, "zero"}});
+        prepare(canvas);
+        const auto path = canvas.referencePath();
+        const auto bounds = path.boundingRect();
+        QVERIFY(std::abs(bounds.bottom() - 700) < 2);
+        QVERIFY(std::abs(bounds.top()) < 2);
+        QVERIFY(std::abs(bounds.center().x()) < 50);
+        const QPointF stem(bounds.left() + 20, 150);
+        QVERIFY(path.contains(stem));
+        const auto bytes = projectBytes(canvas.projectSnapshot());
+        const auto pixel = [&canvas](QPointF p) {
+            return canvas.grab().toImage().pixelColor(canvas.viewport().toScreen(p).toPoint());
+        };
+        const auto shown = pixel(stem);
+        const auto paper = pixel({bounds.center().x(), 150});
+        QVERIFY(shown.lightness() < paper.lightness());
+        canvas.setReferenceVisible(false);
+        QCOMPARE(pixel(stem), paper);
+        canvas.setReferenceVisible(true);
+        canvas.setGeometrySnapEnabled(true);
+        canvas.setTool(Tool::Rectangle);
+        const auto edge = canvas.viewport().toScreen({bounds.left(), 150}).toPoint();
+        movePointer(canvas, edge + QPoint(3, 0));
+        QVERIFY(canvas.rect().contains(edge));
+        QVERIFY(!markerAt(canvas, edge));
+        zoom(canvas, {300, 300}, 240);
+        drag(canvas, {400, 300}, {350, 260}, Qt::MiddleButton);
+        QVERIFY(canvas.rect().contains(canvas.viewport().toScreen(stem).toPoint()));
+        QCOMPARE(pixel(stem), shown);
+        canvas.setTool(Tool::Select);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, canvas.viewport().toScreen(stem).toPoint());
+        QVERIFY(canvas.document().shapes().empty());
+        QVERIFY(!canvas.document().selection());
+        QCOMPARE(projectBytes(canvas.projectSnapshot()), bytes);
+        QVERIFY(canvas.setActiveGlyph({2}));
+        QVERIFY(canvas.referencePath().isEmpty());
+        QVERIFY(canvas.setActiveGlyph({1}));
+        QCOMPARE(canvas.referencePath(), path);
     }
     void moveAndResizeAcquireGuideIntersection() {
         Canvas canvas;
@@ -174,6 +236,31 @@ private slots:
         QVERIFY(canvas.document().shapes().empty());
         QVERIFY(canvas.setActiveGlyph({1}));
         QCOMPARE(canvas.document().shapes()[0].path, original[0].path);
+    }
+    void builderMergesItsOwnCurvedFragmentsAgain() {
+        Canvas canvas;
+        prepare(canvas);
+        QTest::keyClick(&canvas, Qt::Key_E);
+        drag(canvas, {100, 100}, {300, 300});
+        QTest::keyClick(&canvas, Qt::Key_R);
+        drag(canvas, {225, 167}, {358, 367});
+        QTest::keyClick(&canvas, Qt::Key_V);
+        QTest::keyClick(&canvas, Qt::Key_A, Qt::ControlModifier);
+        QTest::keyClick(&canvas, Qt::Key_B);
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, {340, 350});
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(2));
+        // The fragment's flattened arc now coincides with the ellipse outline.
+        QTest::keyClick(&canvas, Qt::Key_A, Qt::ControlModifier);
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::NoModifier, {130, 200});
+        movePointer(canvas, {260, 230});
+        movePointer(canvas, {340, 350});
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::NoModifier, {340, 350});
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(1));
+        const auto &merged = canvas.document().shapes()[0].path;
+        for (const QPoint point : {QPoint(130, 200), QPoint(260, 230), QPoint(340, 350)})
+            QVERIFY(merged.contains(canvas.viewport().toDocument(point)));
+        canvas.undo();
+        QCOMPARE(canvas.document().shapes().size(), std::size_t(2));
     }
     void glyphDrawingsHistoryAndSelectionStayIndependent() {
         Canvas canvas({{{42}, "zero"}, {{900}, "alternate one"}});

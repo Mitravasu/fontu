@@ -1,4 +1,5 @@
 #include "canvas.h"
+#include "guide_preview.h"
 #include "project_creation.h"
 #include <QFocusEvent>
 #include <QKeyEvent>
@@ -50,6 +51,7 @@ Canvas::Canvas(std::vector<GlyphSeed> glyphs, QWidget *parent) : QWidget(parent)
     const auto publishHint = [this] { emit controlsHintChanged(controlsHint()); };
     connect(this, &Canvas::toolChanged, this, publishHint);
     connect(this, &Canvas::historyChanged, this, publishHint);
+    refreshReference();
 }
 std::vector<GlyphSeed> Canvas::glyphs() const {
     std::vector<GlyphSeed> result;
@@ -71,6 +73,7 @@ bool Canvas::setActiveGlyph(GlyphId id) {
     resizeHandle_ = -1;
     activeGlyphIndex_ = index;
     refreshBuilder();
+    refreshReference();
     setCursor(tool_ == Tool::Select ? Qt::ArrowCursor : Qt::CrossCursor);
     emit activeGlyphChanged();
     emit historyChanged();
@@ -104,6 +107,7 @@ void Canvas::restoreProject(ProjectSnapshot project) {
     glyphs_ = std::move(replacement);
     activeGlyphIndex_ = activeIndex;
     refreshBuilder();
+    refreshReference();
     resetView();
     emit glyphsChanged();
     emit activeGlyphChanged();
@@ -187,6 +191,20 @@ void Canvas::setRenderMode(RenderMode mode) {
     if (renderMode_ == mode) return;
     renderMode_ = mode;
     emit renderModeChanged(mode);
+    update();
+}
+void Canvas::setReferenceVisible(bool visible) {
+    if (referenceVisible_ == visible) return;
+    referenceVisible_ = visible;
+    emit referenceVisibilityChanged(visible);
+    update();
+}
+void Canvas::setReferenceFont(const QFont &font) {
+    referenceFont_ = font;
+    refreshReference();
+}
+void Canvas::refreshReference() {
+    reference_ = referenceGlyphPath(activeGlyph().seed.label, document().definition(), referenceFont_);
     update();
 }
 void Canvas::refreshBuilder() {
@@ -281,18 +299,27 @@ void Canvas::paintEvent(QPaintEvent *) {
         const double sy = viewport_.toScreen({0, y}).y();
         painter.drawLine(QPointF(0, sy), QPointF(width(), sy));
     }
+    if (referenceVisible_ && !reference_.isEmpty()) {
+        // Tracing guide only: never part of the document, hit testing, snapping, or export.
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setTransform(viewport_.transform());
+        painter.fillPath(reference_, QColor(71, 85, 105, 38));
+    }
     painter.restore();
     painter.setPen(QPen(QColor("#8492a6"), 1));
     painter.drawRect(page);
     for (const auto &guide : definition.guides()) {
         if (!guide.enabled) continue;
         const auto y = viewport_.toScreen({0, guide.position}).y();
-        const bool baseline = guide.position == definition.baseline;
-        QPen pen(baseline ? QColor("#5c6a91") : QColor("#a7b2c8"), baseline ? 1.5 : 1);
+        // Same per-guide colours as the creation preview; baseline solid, the rest dashed.
+        const QString name = QString::fromUtf8(guide.name);
+        const bool baseline = name == "Baseline";
+        const QColor color = guideColor(name);
+        QPen pen(color, baseline ? 1.5 : 1);
         pen.setStyle(baseline ? Qt::SolidLine : Qt::DashLine);
         painter.setPen(pen);
         painter.drawLine(QPointF(page.left(), y), QPointF(page.right(), y));
-        painter.setPen(QColor("#48566f"));
+        painter.setPen(color.darker(135));
         const auto labelX = std::clamp(page.left() + 8, 8.0, std::max(8.0, width() - 170.0));
         if (y >= 12 && y <= height() - 18)
             painter.drawText(QPointF(labelX, y - 5), QString::fromUtf8(guide.name) + " " + QString::number(guide.position));

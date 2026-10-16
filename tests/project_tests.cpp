@@ -107,6 +107,36 @@ private slots:
             QCOMPARE(std::get<ProjectSnapshot>(accepted).definition.bounds.width(), extent);
         }
     }
+    void presetsValidateAndGuideErrorsAreSpecific() {
+        for (const auto &preset : creationPresets()) {
+            const auto error = validateWorkspace(preset.definition);
+            QVERIFY2(!error, preset.name);
+        }
+        auto d = creationPresets()[1].definition;
+        d.xHeight = 1200; d.capHeight = 1600; d.ascender = 1800;
+        auto error = validateWorkspace(d);
+        QVERIFY(error);
+        QCOMPARE(error->field, CreationField::Guides);
+        QCOMPARE(error->guides, QStringList({"Ascender", "Cap height"}));
+        QCOMPARE(error->message, QString("Ascender (1800) and Cap height (1600) are above the workspace top (1536). "
+                                         "Raise Height to at least 2400 units, or move those guides inside -512 to 1536."));
+        QVERIFY(std::holds_alternative<CreationError>(createProject({d, BuiltinCharacters::Numbers})));
+        d = {};
+        d.descender = -300; d.guideEnabled.descender = false;
+        error = validateWorkspace(d);
+        QVERIFY(error);
+        QCOMPARE(error->guides, QStringList({"Descender"}));
+        QVERIFY(error->message.startsWith("Descender (-300) is below the workspace bottom (-250). Raise Height to at least 1200 units, or move Descender inside -250 to 750."));
+        QVERIFY(error->message.contains("Unchecked guides must fit too"));
+        d = {};
+        d.ascender = 7000;
+        QVERIFY(!validateWorkspace(d)->message.contains("Raise Height")); // Would need more than 8192.
+        d = {};
+        d.xHeight = 720;
+        error = validateWorkspace(d);
+        QCOMPARE(error->guides, QStringList({"x-height", "Cap height"}));
+        QVERIFY(error->message.startsWith("x-height (720) is above Cap height (700)."));
+    }
     void optionalGuidesRoundtripAndSnapping() {
         auto project = fixture();
         project.definition.guideEnabled = {false, true, false, true, false};
