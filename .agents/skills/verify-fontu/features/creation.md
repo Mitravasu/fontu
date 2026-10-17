@@ -2,9 +2,9 @@
 
 Run `.agents/skills/verify-fontu/helpers/control-fontu creation --evidence <new-directory>`.
 
-The recipe drives the unchanged production window with Qt events and the offscreen backend. It checks Create and Open at 800 by 600, rejects empty Custom and invalid guides, and opens an older version-1 file without guide flags. Hidden editor Undo must preserve retained content.
+The recipe drives the unchanged production window with Qt events and the offscreen backend. It checks Create and Open at 800 by 600, rejects empty Custom, and opens an older version-1 file without guide flags. With Keep proportions on, UPM rescales the workspace and Height rescales the guides; an Ascender typed above the workspace is clamped to the top with a guide note (no error), and only an out-of-order Ascender blocks Create. Hidden editor Undo must preserve retained content.
 
-It pastes a Custom set through the standard Paste shortcut. Supplementary-plane emoji, repeated scalars, space, LF, nonbreaking space, and U+2028 retain exact code points and first-appearance order. Nondefault 1200 by 1400 bounds, 2048 UPM, edited metrics, and an unchecked x-height must reach the editor. Pixel checks prove hidden x-height absence and enabled cap-height rendering. Rectangle events ignore the disabled guide and snap to the enabled guide.
+It pastes a Custom set through the standard Paste shortcut. Supplementary-plane emoji, repeated scalars, space, LF, nonbreaking space, and U+2028 retain exact code points and first-appearance order. Nondefault 1200 by 1400 bounds (entered after 2048 UPM), edited metrics, and an unchecked x-height must reach the editor. Pixel checks in each guide's shared `guideColor()` prove hidden x-height absence and enabled cap-height rendering. Guide-preview dragging is covered by `project_window_tests`, not this recipe. Rectangle events ignore the disabled guide and snap to the enabled guide.
 
 The glyph picker switches to the emoji, where drawing, Undo, and Redo are independent. Save As and Open preserve exact settings, characters, and drawings. Dirty Create Cancel and Back preserve filename, drawings, viewport, and history. Dirty Create Save writes the retained project before replacement. Discard creates a clean Untitled project with empty histories.
 

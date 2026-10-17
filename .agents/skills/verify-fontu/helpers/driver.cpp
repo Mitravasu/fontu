@@ -21,6 +21,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QLabel>
+#include "guide_preview.h"
 #include <QComboBox>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
@@ -806,15 +807,24 @@ void creation() {
     QTest::keyClick(create,Qt::Key(binding.key()),binding.keyboardModifiers());
     require(fontu::projectBytes(canvas->projectSnapshot())==retained,"hidden Undo changed retained project");
     chooseCoverage(3); customText(QString::fromUtf8("A😀Aé😀 \n\u00a0\u2028"));
-    formField("workspaceWidth","1200"); formField("workspaceHeight","1400"); formField("unitsPerEm","2048");
+    // Keep proportions is on: UPM first (it rescales the workspace), then explicit dimensions.
+    formField("unitsPerEm","2048");
+    require(window->findChild<QSpinBox *>("workspaceHeight")->value()==2048,"UPM did not rescale workspace");
+    formField("workspaceWidth","1200"); formField("workspaceHeight","1400");
+    require(window->findChild<QDoubleSpinBox *>("ascender")->value()==1050,"Height did not rescale guides");
     formField("xHeight","480"); formField("capHeight","690"); formField("ascender","1100");
+    require(window->findChild<QDoubleSpinBox *>("ascender")->value()==1050
+        && window->findChild<QLabel *>("guideNote")->text().contains("Ascender")
+        && !window->findChild<QLabel *>("creationError")->isVisible(),"out-of-workspace guide not clamped with a note");
+    record("UPM and Height rescale guides; out-of-workspace Ascender clamped to the workspace top with a note");
+    formField("ascender","600");
     auto *xEnabled=window->findChild<QCheckBox *>("xHeightEnabled");
     window->findChild<QScrollArea *>("creationScroll")->ensureWidgetVisible(xEnabled);
     QTest::mouseClick(xEnabled,Qt::LeftButton,Qt::NoModifier,QPoint(8,xEnabled->height()/2));
     require(!xEnabled->isChecked(),"x-height toggle failed");
     createClick();
-    require(window->findChild<QWidget *>("creationPage")->isVisible() && window->findChild<QLabel *>("creationError")->text().contains("Ascender"),"invalid guide admitted");
-    formField("ascender","800"); record("Custom creation values and disabled x-height; invalid guide rejected");
+    require(window->findChild<QWidget *>("creationPage")->isVisible() && window->findChild<QLabel *>("creationError")->text().contains("Ascender"),"out-of-order guide admitted");
+    formField("ascender","800"); record("Custom creation values and disabled x-height; out-of-order guide rejected");
     createClick();
     const auto &d=canvas->document().definition();
     require(d.bounds==QRectF(-600,-350,1200,1400) && d.unitsPerEm==2048 && d.xHeight==480 && d.capHeight==690
@@ -824,16 +834,16 @@ void creation() {
         && canvas->glyphs()[6].label==QString(QChar(0x2028)),"Custom scalar order or dedup wrong");
     const auto page=canvas->viewport().transform().mapRect(d.bounds);
     require(canvas->rect().contains(page.toAlignedRect()),"configured page does not fit final editor layout");
-    const auto guideInk=[&](double position) {
+    const auto guideInk=[&](double position,const QString &name) {
         const auto picture=canvas->grab().toImage();
         const auto y=canvas->viewport().toScreen({0,position}).toPoint().y(); int count=0;
         const auto left=canvas->viewport().toScreen({-400,0}).toPoint().x();
         const auto right=canvas->viewport().toScreen({-100,0}).toPoint().x();
         for(int x=left;x<=right;++x) for(int line=y-1;line<=y+1;++line)
-            if(picture.pixelColor(x,line)==QColor("#a7b2c8")) ++count;
+            if(picture.pixelColor(x,line)==fontu::guideColor(name)) ++count;
         return count;
     };
-    require(guideInk(480)==0 && guideInk(690)>20,"guide rendering does not match enablement");
+    require(guideInk(480,"x-height")==0 && guideInk(690,"Cap height")>20,"guide rendering does not match enablement");
     record("Configured bounds fit at 800 by 600; hidden x-height absent and enabled cap guide visible");
     window->resize(1100,760); QApplication::processEvents(); toolbar("Reset view (0)");
     if(canvas->gridSnapEnabled()) snap("snapToGrid");
