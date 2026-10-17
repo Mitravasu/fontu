@@ -2,7 +2,7 @@
 
 A native Qt 6 / C++ vector canvas for font creation. Milestone 1 supports rectangles, ellipses, open pen paths, filled closed pen shapes, selection, movement, eight resize handles, deletion, undo and redo, a grid, a bounded glyph workspace, labeled typography guides, optional snapping to the grid and shape geometry or guides, zoom, and pan. Geometry remains editable paths in document space. Startup offers a configurable creation page or Open for saved projects. The right Glyphs panel contains the chosen Numbers, Letters, Programming, or Custom character set. Each glyph retains its completed drawing, selection, and Undo/Redo history when you switch.
 
-The creation page offers example presets, workspace dimensions, independent units per em, and selectable typography guides with editable values. Classic defaults to 1000 by 1000 font units at 1000 UPM. Creation and Reset view fit the document. Drawing and editing stop at its bounds while pan and zoom remain available outside it. See [project creation](docs/project-creation.md) for exact ranges, character coverage, and replacement behavior.
+The creation page offers example presets, workspace dimensions, independent units per em, and selectable typography guides with editable values, including vertical side-bearing guides that keep glyph widths consistent for monospaced fonts. Classic defaults to 1000 by 1000 font units at 1000 UPM. Creation and Reset view fit the document. Drawing and editing stop at its bounds while pan and zoom remain available outside it. See [project creation](docs/project-creation.md) for exact ranges, character coverage, and replacement behavior.
 
 ## Quick start
 

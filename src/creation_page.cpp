@@ -98,6 +98,18 @@ CreationPage::CreationPage(QWidget *parent) : QWidget(parent) {
         connect(values_[i], &QDoubleSpinBox::valueChanged, this, [this, i] { guideEdited(i); });
         connect(enabled_[i], &QCheckBox::toggled, this, &CreationPage::refreshGuides);
     }
+    sideBearingEnabled_ = new QCheckBox("Side bearing", guides);
+    sideBearingEnabled_->setObjectName("sideBearingEnabled");
+    sideBearingEnabled_->setIcon(QIcon(guideSwatch("Side bearing", devicePixelRatioF())));
+    sideBearingEnabled_->setIconSize({18, 12});
+    sideBearing_ = new QDoubleSpinBox(guides); sideBearing_->setObjectName("sideBearing");
+    sideBearing_->setRange(0, 16384); sideBearing_->setDecimals(3); sideBearing_->setSuffix(" units");
+    for (QWidget *control : {static_cast<QWidget *>(sideBearingEnabled_), static_cast<QWidget *>(sideBearing_)})
+        control->setToolTip("Two vertical guides this far in from each side of the workspace. Keep every glyph, including the widest such as m and W, between them so spacing stays even in a monospaced font.");
+    grid->addWidget(sideBearingEnabled_, int(guideControls.size()), 0);
+    grid->addWidget(sideBearing_, int(guideControls.size()), 1);
+    connect(sideBearing_, &QDoubleSpinBox::valueChanged, this, &CreationPage::sideBearingEdited);
+    connect(sideBearingEnabled_, &QCheckBox::toggled, this, &CreationPage::refreshGuides);
     grid->setColumnStretch(1, 1);
     grid->setVerticalSpacing(4);
     guidesRow->addLayout(grid, 1);
@@ -109,7 +121,7 @@ CreationPage::CreationPage(QWidget *parent) : QWidget(parent) {
     guideNote_ = wrapped({}, guides); guideNote_->setObjectName("guideNote");
     guideNote_->setForegroundRole(QPalette::PlaceholderText); guideNote_->hide();
     guidesLayout->addWidget(guideNote_);
-    guidesLayout->addWidget(wrapped("Drag the lines in the preview or type exact values. Checked guides are drawn and used by Geometry snapping; unchecked values are kept. Guides stay inside the workspace.", guides));
+    guidesLayout->addWidget(wrapped("Drag the lines in the preview or type exact values. Checked guides are drawn and used by Geometry snapping; unchecked values are kept. Guides stay inside the workspace. The two Side bearing lines mark the widest a glyph should reach, so every glyph keeps the same spacing in a monospaced font.", guides));
     layout->addWidget(guides);
     auto *characters = new QGroupBox("Characters", content);
     auto *characterLayout = new QVBoxLayout(characters);
@@ -148,6 +160,7 @@ CreationPage::CreationPage(QWidget *parent) : QWidget(parent) {
         // Spin boxes commit on Enter or focus change; a click on a non-focus-taking button must commit too.
         for (auto *box : {width_, height_, unitsPerEm_}) box->interpretText();
         for (auto *box : values_) box->interpretText();
+        sideBearing_->interpretText();
         emit createRequested();
     });
     connect(presets_, &QComboBox::activated, this, &CreationPage::applyPreset);
@@ -174,6 +187,8 @@ GlyphDocumentDefinition CreationPage::definition() const {
         d.*(guideControls[i].value) = values_[i]->value();
         d.guideEnabled.*(guideControls[i].enabled) = enabled_[i]->isChecked();
     }
+    d.sideBearing = sideBearing_->value();
+    d.guideEnabled.sideBearing = sideBearingEnabled_->isChecked();
     return d;
 }
 void CreationPage::applyPreset(int index) {
@@ -185,6 +200,8 @@ void CreationPage::applyPreset(int index) {
         values_[i]->setValue(d.*(guideControls[i].value));
         enabled_[i]->setChecked(d.guideEnabled.*(guideControls[i].enabled));
     }
+    sideBearing_->setValue(d.sideBearing);
+    sideBearingEnabled_->setChecked(d.guideEnabled.sideBearing);
     syncing_ = false;
     anchor_ = {width_->value(), height_->value(), unitsPerEm_->value()};
     rebaseGuides();
@@ -197,8 +214,15 @@ void CreationPage::setGuideValue(std::size_t index, double value) {
     values_[index]->setValue(value);
     syncing_ = was;
 }
+void CreationPage::setSideBearingValue(double value) {
+    const bool was = syncing_;
+    syncing_ = true;
+    sideBearing_->setValue(value);
+    syncing_ = was;
+}
 void CreationPage::rebaseGuides() {
     for (std::size_t i = 0; i < guideControls.size(); ++i) intent_[i] = {values_[i]->value(), height_->value()};
+    sideBearingIntent_ = {sideBearing_->value(), width_->value()};
 }
 void CreationPage::dimensionsEdited() {
     if (syncing_) return;
@@ -232,15 +256,25 @@ void CreationPage::syncGuides() {
     for (std::size_t i = 0; i < guideControls.size(); ++i) {
         const auto &intent = intent_[i];
         double wanted = intent.value;
-        if (proportional_->isChecked() && intent.height != height && intent.height > 0)
-            wanted = std::round(intent.value * height / intent.height);
+        if (proportional_->isChecked() && intent.extent != height && intent.extent > 0)
+            wanted = std::round(intent.value * height / intent.extent);
         const double shown = std::clamp(wanted, low, high);
         if (shown != wanted && !proportional_->isChecked())
             limited << QString("%1 %2 → %3").arg(QString::fromUtf8(guideControls[i].label)).arg(wanted).arg(shown);
         setGuideValue(i, shown);
     }
+    const int width = width_->value();
+    double wantedSide = sideBearingIntent_.value;
+    if (proportional_->isChecked() && sideBearingIntent_.extent != width && sideBearingIntent_.extent > 0)
+        wantedSide = std::round(sideBearingIntent_.value * width / sideBearingIntent_.extent);
+    const double shownSide = std::min(wantedSide, std::floor(width / 2.));
+    const bool sideLimited = shownSide != wantedSide && !proportional_->isChecked();
+    const bool heightLimited = !limited.isEmpty();
+    if (sideLimited) limited << QString("Side bearing %1 → %2").arg(wantedSide).arg(shownSide);
+    setSideBearingValue(shownSide);
+    const QString restore = heightLimited && sideLimited ? "Raise Width and Height" : sideLimited ? "Raise Width" : "Raise Height";
     guideNote_->setText(limited.isEmpty() ? QString()
-        : "Limited to the workspace for now: " + limited.join(", ") + ". Raise Height to restore.");
+        : "Limited to the workspace for now: " + limited.join(", ") + ". " + restore + " to restore.");
     guideNote_->setVisible(!limited.isEmpty());
     refreshGuides();
 }
@@ -261,7 +295,29 @@ void CreationPage::guideEdited(std::size_t index) {
     intent_[index] = {shown, height};
     refreshGuides();
 }
+void CreationPage::sideBearingEdited() {
+    if (syncing_) return;
+    const int width = width_->value();
+    const double typed = sideBearing_->value();
+    const double shown = std::min(typed, std::floor(width / 2.));
+    if (shown != typed) {
+        setSideBearingValue(shown);
+        guideNote_->setText(QString("Side bearing was set to %1, half the workspace width. Raise Width for more room.").arg(shown));
+        guideNote_->show();
+    } else {
+        guideNote_->clear(); guideNote_->hide();
+    }
+    sideBearingIntent_ = {shown, width};
+    refreshGuides();
+}
 void CreationPage::guideDragged(const QString &name, double value) {
+    if (name == "Side bearing") {
+        setSideBearingValue(value);
+        sideBearingIntent_ = {value, width_->value()};
+        guideNote_->clear(); guideNote_->hide();
+        refreshGuides();
+        return;
+    }
     for (std::size_t i = 0; i < guideControls.size(); ++i) {
         if (QString::fromUtf8(guideControls[i].label) != name) continue;
         setGuideValue(i, value);
@@ -287,6 +343,9 @@ void CreationPage::refreshGuides() {
         values_[i]->setStyleSheet(bad ? invalidFieldStyle : "");
         values_[i]->setToolTip(bad ? error->message : QString());
     }
+    const bool badSide = invalid.contains("Side bearing");
+    sideBearing_->setProperty("invalid", badSide);
+    sideBearing_->setStyleSheet(badSide ? invalidFieldStyle : "");
     // Keep a shown workspace error in step with the values: update it while it applies, clear it once fixed.
     if (error && error->field == CreationField::Guides) setError(error->message, true);
     else if (workspaceError_) setError({});
@@ -319,6 +378,7 @@ void CreationPage::showError(const CreationError &error) {
         : error.field == CreationField::Characters ? static_cast<QWidget *>(custom_) : static_cast<QWidget *>(values_[0]);
     for (std::size_t i = 0; error.field == CreationField::Guides && i < guideControls.size(); ++i)
         if (error.guides.contains(QString::fromUtf8(guideControls[i].label))) { target = values_[i]; break; }
+    if (error.field == CreationField::Guides && error.guides.contains("Side bearing")) target = sideBearing_;
     findChild<QScrollArea *>()->ensureWidgetVisible(target);
     target->setFocus();
 }

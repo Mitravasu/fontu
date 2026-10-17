@@ -32,6 +32,9 @@ std::array<TypographyGuide, 5> GlyphDocumentDefinition::guides() const {
              {"x-height", xHeight, guideEnabled.xHeight}, {"Baseline", baseline, guideEnabled.baseline},
              {"Descender", descender, guideEnabled.descender}}};
 }
+std::array<double, 2> GlyphDocumentDefinition::sideBearingGuides() const {
+    return {bounds.left() + sideBearing, bounds.right() - sideBearing};
+}
 QPointF GlyphDocumentDefinition::constrainPoint(const QPointF &point) const {
     return {std::clamp(point.x(), bounds.left(), bounds.right()),
             std::clamp(point.y(), bounds.top(), bounds.bottom())};

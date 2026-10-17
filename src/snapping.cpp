@@ -49,6 +49,15 @@ std::optional<std::pair<SnapResult, QPointF>> snapPoints(
                 if (options.grid && definition.bounds.contains(crossing))
                     consider(intersections[i], point, viewport.toScreen(crossing));
             }
+            if (definition.guideEnabled.sideBearing) {
+                for (const double sideX : definition.sideBearingGuides()) {
+                    for (const auto &guide : definition.guides())
+                        if (guide.enabled) consider(intersections[i], point, viewport.toScreen({sideX, guide.position}));
+                    const QPointF crossing(sideX, gridY);
+                    if (options.grid && definition.bounds.contains(crossing))
+                        consider(intersections[i], point, viewport.toScreen(crossing));
+                }
+            }
             const QPointF originGridCrossing(0, gridY);
             if (options.grid && definition.bounds.contains(originGridCrossing))
                 consider(intersections[i], point, viewport.toScreen(originGridCrossing));
@@ -74,6 +83,9 @@ std::optional<std::pair<SnapResult, QPointF>> snapPoints(
                     if (guide.enabled)
                         considerTarget(viewport.toScreen({definition.constrainPoint(docPoint).x(), guide.position}));
                 considerTarget(viewport.toScreen({0, definition.constrainPoint(docPoint).y()}));
+                if (definition.guideEnabled.sideBearing)
+                    for (const double sideX : definition.sideBearingGuides())
+                        considerTarget(viewport.toScreen({sideX, definition.constrainPoint(docPoint).y()}));
             }
             for (const auto &shape : document.shapes()) {
                 if (excluded == shape.id || std::find(excludedIds.begin(), excludedIds.end(), shape.id) != excludedIds.end()) continue;

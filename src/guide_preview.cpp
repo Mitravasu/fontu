@@ -23,6 +23,7 @@ QColor guideColor(const QString &name) {
     if (name == "x-height") return QColor("#17a673");
     if (name == "Baseline") return QColor("#e08a00");
     if (name == "Descender") return QColor("#d0479a");
+    if (name == "Side bearing") return QColor("#0891b2");
     return QColor("#8492a6");
 }
 QPixmap guideSwatch(const QString &name, qreal devicePixelRatio) {
@@ -31,15 +32,20 @@ QPixmap guideSwatch(const QString &name, qreal devicePixelRatio) {
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(QPen(guideColor(name), 3, Qt::SolidLine, Qt::RoundCap));
-    painter.drawLine(QPointF(2, 6), QPointF(16, 6));
+    painter.setPen(QPen(guideColor(name), name == "Side bearing" ? 2 : 3, Qt::SolidLine, Qt::RoundCap));
+    if (name == "Side bearing") {
+        painter.drawLine(QPointF(4, 1), QPointF(4, 11));
+        painter.drawLine(QPointF(14, 1), QPointF(14, 11));
+    } else {
+        painter.drawLine(QPointF(2, 6), QPointF(16, 6));
+    }
     return pixmap;
 }
 GuidePreview::GuidePreview(QWidget *parent) : QWidget(parent) {
     setObjectName("guidePreview");
     setMouseTracking(true);
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
-    setToolTip("Drag a guide line or its label up or down to set its value. Positive Y points upward.");
+    setToolTip("Drag a guide line or its label up or down to set its value. Positive Y points upward. Drag a side-bearing line left or right.");
 }
 void GuidePreview::setDefinition(const GlyphDocumentDefinition &definition, const QStringList &invalidGuides) {
     definition_ = definition;
@@ -64,6 +70,28 @@ GuidePreview::Frame GuidePreview::frame() const {
 }
 double GuidePreview::toY(const Frame &f, double value) const {
     return f.page.bottom() - (std::clamp(value, f.low, f.high) - f.low) * f.scale;
+}
+double GuidePreview::toX(const Frame &f, double value) const {
+    return f.page.left() + (value - definition_.bounds.left()) * f.scale;
+}
+QPointF GuidePreview::sideBearingPoint() const {
+    const auto f = frame();
+    return {toX(f, definition_.sideBearingGuides()[0]), f.page.center().y()};
+}
+double GuidePreview::draggedSideBearing(double x) const {
+    const auto f = frame();
+    if (!f.valid) return 0;
+    const auto &b = definition_.bounds;
+    const double docX = b.left() + (x - f.page.left()) / f.scale;
+    // Measured from the nearer edge, so either line drags both symmetrically.
+    return std::clamp(std::round(std::min(docX - b.left(), b.right() - docX)), 0.0, std::floor(b.width() / 2));
+}
+bool GuidePreview::sideBearingAt(const QPointF &point) const {
+    const auto f = frame();
+    if (!f.valid || point.y() < f.page.top() || point.y() > f.page.bottom()) return false;
+    for (const double x : definition_.sideBearingGuides())
+        if (std::abs(point.x() - toX(f, x)) <= hitTolerance) return true;
+    return false;
 }
 QPointF GuidePreview::guidePoint(const QString &name) const {
     const auto f = frame();
@@ -100,6 +128,7 @@ QStringList GuidePreview::guidesAt(const QPointF &point) const {
 void GuidePreview::mousePressEvent(QMouseEvent *event) {
     if (event->button() != Qt::LeftButton) return QWidget::mousePressEvent(event);
     candidates_ = guidesAt(event->position());
+    if (candidates_.isEmpty() && sideBearingAt(event->position())) candidates_ = {"Side bearing"};
     pressY_ = event->position().y();
     dragging_ = candidates_.size() == 1 ? candidates_.front() : QString();
     if (!candidates_.isEmpty()) { setCursor(Qt::ClosedHandCursor); event->accept(); update(); }
@@ -108,9 +137,15 @@ void GuidePreview::mouseMoveEvent(QMouseEvent *event) {
     const double y = event->position().y();
     if (!(event->buttons() & Qt::LeftButton) || candidates_.isEmpty()) {
         const auto hits = guidesAt(event->position());
-        const QString hover = hits.isEmpty() ? QString() : hits.front();
+        const bool side = hits.isEmpty() && sideBearingAt(event->position());
+        const QString hover = side ? QString("Side bearing") : hits.isEmpty() ? QString() : hits.front();
         if (hover != hovered_) { hovered_ = hover; update(); }
-        if (hits.isEmpty()) unsetCursor(); else setCursor(Qt::SizeVerCursor);
+        if (side) setCursor(Qt::SizeHorCursor); else if (hits.isEmpty()) unsetCursor(); else setCursor(Qt::SizeVerCursor);
+        return;
+    }
+    if (dragging_ == "Side bearing") {
+        const double value = draggedSideBearing(event->position().x());
+        if (value != definition_.sideBearing) emit guideDragged(dragging_, value);
         return;
     }
     if (dragging_.isEmpty()) {
@@ -123,7 +158,10 @@ void GuidePreview::mouseMoveEvent(QMouseEvent *event) {
         if (name == dragging_ && current != value) emit guideDragged(dragging_, value);
 }
 void GuidePreview::mouseReleaseEvent(QMouseEvent *event) {
-    if (event->button() == Qt::LeftButton) { candidates_.clear(); dragging_.clear(); setCursor(Qt::SizeVerCursor); update(); }
+    if (event->button() == Qt::LeftButton) {
+        setCursor(dragging_ == "Side bearing" ? Qt::SizeHorCursor : Qt::SizeVerCursor);
+        candidates_.clear(); dragging_.clear(); update();
+    }
     QWidget::mouseReleaseEvent(event);
 }
 void GuidePreview::leaveEvent(QEvent *event) {
@@ -177,6 +215,18 @@ void GuidePreview::paintEvent(QPaintEvent *) {
     painter.drawPath(map.map(sample));
     painter.restore();
 
+    {
+        const QString name("Side bearing");
+        const bool invalid = invalid_.contains(name);
+        const bool active = name == dragging_ || (dragging_.isEmpty() && name == hovered_);
+        QColor color = invalid ? invalidColor : guideColor(name);
+        if (!d.guideEnabled.sideBearing && !invalid) color.setAlphaF(.5);
+        painter.setPen(QPen(color, active ? 3 : invalid ? 2 : 1.6, d.guideEnabled.sideBearing ? Qt::SolidLine : Qt::DashLine, Qt::FlatCap));
+        for (const double x : d.sideBearingGuides()) {
+            const double sx = std::clamp(toX(f, x), page.left(), page.right());
+            painter.drawLine(QPointF(sx, page.top()), QPointF(sx, page.bottom()));
+        }
+    }
     struct Label { QString name, text; double lineY, y; QColor color; bool invalid; };
     std::vector<Label> labels;
     for (const auto &guide : d.guides()) {
