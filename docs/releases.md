@@ -2,6 +2,8 @@
 
 The [release workflow](../.github/workflows/release.yml) builds, runs all five CTest suites, bundles dependencies, checks GUI startup, and uploads a package for each platform. A pushed `v*.*.*` tag publishes a GitHub Release only after every matrix job succeeds. The tag must exactly match `v` followed by the CMake project version. For example, version `0.1.0` requires `v0.1.0`.
 
+Every pull request into `main` runs the [CI workflow](../.github/workflows/ci.yml), which configures, builds, and runs all CTest suites and the packaging script tests on the same three platforms and Qt version, without packaging. A new push to the pull request cancels the previous run. Make the three `Build and test` checks required in the branch protection rules for `main` to block merging until they pass.
+
 Manual **Actions > Release > Run workflow** runs the same build, test, and packaging steps without creating a release, even when dispatched against a tag. The workflow must be on the default branch for GitHub to show the dispatch button. Use a manual run to verify Windows and Linux before tagging the first release. Download the three artifacts from that run and test them on machines without Qt installed.
 
 | Package | Build environment | Distribution target |
