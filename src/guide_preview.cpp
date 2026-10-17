@@ -50,7 +50,9 @@ GuidePreview::Frame GuidePreview::frame() const {
     Frame f;
     const auto &d = definition_;
     const QFontMetricsF metrics(font());
-    const double labelWidth = metrics.horizontalAdvance("Cap height  -16384.5 ▲") + 14;
+    // Room for the widest label, but never more than about half the widget: wide UI fonts (large
+    // text settings, font substitution) must shrink the diagram, not make it disappear.
+    const double labelWidth = std::min(metrics.horizontalAdvance("Cap height  -16384.5 ▲") + 14, width() * .45);
     const QRectF area = QRectF(rect()).adjusted(8, metrics.height() / 2 + 6, -labelWidth, -metrics.height() / 2 - 6);
     if (area.width() < 20 || area.height() < 20 || d.bounds.width() <= 0 || d.bounds.height() <= 0) return f;
     f.scale = std::min(area.width() / d.bounds.width(), area.height() / d.bounds.height());
@@ -218,7 +220,8 @@ void GuidePreview::paintEvent(QPaintEvent *) {
             : label.color.alphaF() < 1 ? pal.color(QPalette::PlaceholderText) : pal.color(QPalette::Text);
         painter.setPen(textColor);
         auto font = painter.font(); font.setBold(label.name == dragging_); painter.setFont(font);
-        painter.drawText(QPointF(textX, label.y + metrics.ascent() / 2 - 1), label.text);
+        const auto text = QFontMetricsF(font).elidedText(label.text, Qt::ElideRight, std::max(0.0, width() - textX - 2));
+        painter.drawText(QPointF(textX, label.y + metrics.ascent() / 2 - 1), text);
     }
 }
 }

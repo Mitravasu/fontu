@@ -9,6 +9,9 @@ target_include_directories(fontu_core PUBLIC src)
 target_link_libraries(fontu_core PUBLIC Qt6::Gui)
 add_library(fontu_canvas src/canvas.cpp src/reference_glyph.cpp src/snap_menu.cpp src/glyph_panel.cpp src/project_window.cpp src/creation_page.cpp src/guide_preview.cpp)
 target_link_libraries(fontu_canvas PUBLIC fontu_core Qt6::Widgets)
+# Bundled reference-glyph font (Noto Sans subset, SIL OFL 1.1; see resources/fonts/OFL.txt).
+qt_add_resources(fontu_canvas reference_font PREFIX "/fonts" BASE resources/fonts
+    FILES resources/fonts/NotoSans-Regular-subset.ttf)
 add_executable(fontu MACOSX_BUNDLE src/main.cpp)
 target_link_libraries(fontu PRIVATE fontu_canvas)
 set_target_properties(fontu PROPERTIES
@@ -22,6 +25,7 @@ if(APPLE)
 endif()
 install(TARGETS fontu BUNDLE DESTINATION . RUNTIME DESTINATION bin)
 install(FILES LICENSE DESTINATION share/licenses/fontu)
+install(FILES resources/fonts/OFL.txt DESTINATION share/licenses/fontu RENAME NotoSans-OFL.txt)
 if(UNIX AND NOT APPLE)
     install(FILES packaging/fontu.desktop DESTINATION share/applications)
     install(FILES packaging/fontu.svg DESTINATION share/icons/hicolor/scalable/apps)

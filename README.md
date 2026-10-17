@@ -85,7 +85,7 @@ With P, click anchors for straight segments. Drag a second or later anchor to cu
 
 Enter or Return finishes an open stroke with at least two anchors after mouse release. Select open strokes near their outlines. Both finish controls keep the Pen tool active. Hover previews the next segment; it does not add an anchor. Escape discards the entire unfinished path, including between clicks. Horizontal paths have left and right resize handles; vertical paths have top and bottom handles. Resizing preserves their collapsed axis.
 
-A faint reference glyph sits behind each glyph's drawing as a tracing guide. It renders the glyph's single-character label in a system sans-serif (Helvetica, Arial, or DejaVu Sans), with its baseline on the baseline guide, its cap height scaled to the cap-height guide, and its advance centered in the workspace. It is on by default and is view-only: it is never selected, snapped to, saved, or exported. Labels longer than one character show no reference.
+A faint reference glyph sits behind each glyph's drawing as a tracing guide. It renders the glyph's single-character label in a bundled Noto Sans subset, so it looks the same on every platform and needs no installed fonts, with its baseline on the baseline guide, its cap height scaled to the cap-height guide, and its advance centered in the workspace. It is on by default and is view-only: it is never selected, snapped to, saved, or exported. Labels longer than one character show no reference. The subset covers Latin (including Latin-1, Extended-A/B and Extended Additional), combining marks, Greek, Cyrillic, and common punctuation and currency signs; other characters fall back to a system sans-serif (Helvetica, Arial, or DejaVu Sans) when one is installed.
 
 Switching glyphs cancels unfinished Pen drafts and geometry gestures. The canvas view, tools, and snapping stay shared. Clicking a glyph row returns keyboard focus to the canvas.
 
@@ -106,7 +106,7 @@ File actions cancel unfinished Pen drafts and roll back unfinished pointer edits
 - `src/document.*` owns ordered shapes, stable IDs, and single selection. Each shape records whether it is filled or stroked. Shape geometry is a `QPainterPath` containing lines and cubic curves, with no widget or screen coordinates. Geometry functions construct and transform paths.
 - `src/viewport.*` maps an unbounded y-up document plane to y-down logical screen pixels, with cursor-anchored zoom. Rendering and input share this mapping.
 - `src/canvas.*` paints paths, an adaptive grid, and fixed-screen-size handles, and handles gestures. Move/resize updates derive from the original path snapshot. Pen drafts store document-space anchors and tangents until committed. Canvas owns stable glyph records, each with its own Document, before/after snapshots, and history cursor. A single active record drives rendering and editing.
-- `src/reference_glyph.*` maps a label's outline from a system font into document space for the canvas tracing reference.
+- `src/reference_glyph.*` registers the bundled reference font (`resources/fonts`, compiled in as a Qt resource) and maps a label's outline into document space for the canvas tracing reference.
 - `src/snapping.*` queries grid and path targets in screen space, excludes the edited shape by ID, and returns the nearest eligible target.
 - `src/glyph_panel.*` derives a scrolling glyph picker from Canvas metadata and keeps its selected row synchronized.
 - `src/project_creation.*` validates creation settings and builds complete snapshots. `src/creation_page.*` collects workspace, guides, and character choices.
@@ -127,6 +127,16 @@ See [the milestone design](docs/milestone-1-design.md) for decisions and the com
 `canvas_tests` sends mouse, wheel, and keyboard events to the actual widget. It checks drawing, tiny/cancelled drags, overlapping selection, moving, deleting, every resize handle, crossing the resize anchor, off-center handle presses, pan/zoom followed by editing, view reset, Escape/tool-change cancellation, and focus-loss rollback. Snapping cases cover toolbar keyboard/action activation and all toggle states, snapped drawing/moving/resizing, off-center handles, curve outlines, side-handle constraints, self-exclusion, competing grid/geometry targets, zoom/pan mapping, and toggle-change rollback. Pen cases cover straight and cubic segments, exact controls, commit timing, cancellation, snapped anchors and handles, draft navigation, stroke hit testing, and horizontal/vertical movement and resizing. Closing cases check filled triangles, curved closing segments, interior selection and movement, the minimum anchor count, screen capture distance, closure after zoom and pan, and draft cleanup. CTest runs this suite with Qt's offscreen backend.
 
 The canvas suite also passed with the native macOS Qt backend, and a rendered canvas image was inspected. Native test windows do not take desktop focus because the tests inject Qt events directly; focus loss is tested explicitly. Desktop UI automation was unavailable because Computer Use permissions were not granted, so an OS-driven mouse/keyboard walkthrough remains unverified.
+
+## Third-party fonts
+
+`resources/fonts/NotoSans-Regular-subset.ttf` is a subset of Noto Sans Regular 2.015 (unhinted TTF from [notofonts](https://github.com/notofonts/latin-greek-cyrillic)), Copyright 2022 The Noto Project Authors, licensed under the [SIL Open Font License 1.1](resources/fonts/OFL.txt). It declares no Reserved Font Name. Release packages include the license as `NotoSans-OFL.txt`. The subset (about 110 KB) was made with fontTools 4.55.3:
+
+```sh
+pyftsubset NotoSans-Regular.ttf --output-file=NotoSans-Regular-subset.ttf --no-hinting --desubroutinize \
+  --layout-features='' --name-IDs='*' --name-legacy --name-languages='*' \
+  --unicodes='U+0020-007E,U+00A0-024F,U+0300-036F,U+0370-03FF,U+0400-04FF,U+1E00-1EFF,U+2000-206F,U+20A0-20C0,U+2100-214F,U+2190-2199,U+2212,U+2215,U+221E,U+2248,U+2260-2265,U+FB01-FB02'
+```
 
 ## Current limitations
 

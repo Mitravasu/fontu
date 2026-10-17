@@ -37,6 +37,38 @@ void zoom(Canvas &canvas, QPoint position, int delta) {
                       Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
     QApplication::sendEvent(&canvas, &event);
 }
+// Renders the canvas with the reference overlay shown and hidden, restoring the current state.
+std::pair<QImage, QImage> referenceRenders(Canvas &canvas) {
+    const bool visible = canvas.referenceVisible();
+    canvas.setReferenceVisible(true);
+    auto shown = canvas.grab().toImage();
+    canvas.setReferenceVisible(false);
+    auto hidden = canvas.grab().toImage();
+    canvas.setReferenceVisible(visible);
+    return {shown, hidden};
+}
+// Device pixels in the 5x5 neighbourhood of a document point that the overlay darkens. Comparing
+// against the hidden render, not absolute colours, keeps this independent of grid lines, axes,
+// font hinting, and device pixel ratio.
+int darkenedAround(Canvas &canvas, QPointF point) {
+    const auto [shown, hidden] = referenceRenders(canvas);
+    const auto center = (canvas.viewport().toScreen(point) * shown.devicePixelRatio()).toPoint();
+    int count = 0;
+    for (int dy = -2; dy <= 2; ++dy)
+        for (int dx = -2; dx <= 2; ++dx) {
+            const QPoint p = center + QPoint(dx, dy);
+            if (shown.rect().contains(p) && shown.pixelColor(p).lightness() < hidden.pixelColor(p).lightness()) ++count;
+        }
+    return count;
+}
+// Horizontal run of the outline's interior along document row y, starting at or after x.
+std::pair<double, double> interiorRun(const QPainterPath &path, double x, double y) {
+    const double end = path.boundingRect().right();
+    while (x <= end && !path.contains(QPointF(x, y))) x += 1;
+    double right = x;
+    while (right <= end && path.contains(QPointF(right, y))) right += 1;
+    return {x, right - 1};
+}
 void prepare(Canvas &canvas) {
     // Events are sent directly to the widget. Desktop focus must not cancel test drags.
     canvas.setWindowFlag(Qt::WindowDoesNotAcceptFocus);
@@ -108,6 +140,8 @@ private slots:
         }
     }
     void referenceGlyphFollowsMetricsAndStaysVisualOnly() {
+        // The bundled font is used, so the overlay never depends on installed system fonts.
+        QCOMPARE(defaultReferenceFont().families().value(0), QStringLiteral("Noto Sans"));
         Canvas canvas({{{1}, "H"}, {{2}, "zero"}});
         prepare(canvas);
         const auto path = canvas.referencePath();
@@ -115,18 +149,33 @@ private slots:
         QVERIFY(std::abs(bounds.bottom() - 700) < 2);
         QVERIFY(std::abs(bounds.top()) < 2);
         QVERIFY(std::abs(bounds.center().x()) < 50);
-        const QPointF stem(bounds.left() + 20, 150);
-        QVERIFY(path.contains(stem));
+        // Probe the middle of the left stem and the counter beside it, found from the outline.
+        const auto [stemLeft, stemRight] = interiorRun(path, bounds.left(), 150);
+        QVERIFY(stemRight - stemLeft > 20);
+        const QPointF stem((stemLeft + stemRight) / 2, 150);
+        const auto [nextLeft, nextRight] = interiorRun(path, stemRight + 1, 150);
+        QVERIFY(nextLeft - stemRight > 40 && nextRight >= nextLeft);
+        const QPointF counter((stemRight + nextLeft) / 2, 150);
+        QVERIFY(path.contains(stem) && !path.contains(counter));
         const auto bytes = projectBytes(canvas.projectSnapshot());
-        const auto pixel = [&canvas](QPointF p) {
-            return canvas.grab().toImage().pixelColor(canvas.viewport().toScreen(p).toPoint());
-        };
-        const auto shown = pixel(stem);
-        const auto paper = pixel({bounds.center().x(), 150});
-        QVERIFY(shown.lightness() < paper.lightness());
-        canvas.setReferenceVisible(false);
-        QCOMPARE(pixel(stem), paper);
-        canvas.setReferenceVisible(true);
+        QVERIFY(darkenedAround(canvas, stem) >= 20);
+        QCOMPARE(darkenedAround(canvas, counter), 0);
+        // Hiding it changes pixels only within the outline's on-screen bounds.
+        {
+            const auto [shown, hidden] = referenceRenders(canvas);
+            QCOMPARE(shown.size(), hidden.size());
+            const double ratio = shown.devicePixelRatio();
+            const QRectF area = canvas.viewport().transform().mapRect(bounds).adjusted(-2, -2, 2, 2);
+            int changed = 0;
+            for (int y = 0; y < shown.height(); ++y)
+                for (int x = 0; x < shown.width(); ++x)
+                    if (shown.pixel(x, y) != hidden.pixel(x, y)) {
+                        QVERIFY2(area.contains(QPointF(x, y) / ratio), qPrintable(QString("Changed pixel %1,%2").arg(x).arg(y)));
+                        ++changed;
+                    }
+            QVERIFY(changed > 100);
+        }
+        QVERIFY(canvas.referenceVisible());
         canvas.setGeometrySnapEnabled(true);
         canvas.setTool(Tool::Rectangle);
         const auto edge = canvas.viewport().toScreen({bounds.left(), 150}).toPoint();
@@ -136,7 +185,8 @@ private slots:
         zoom(canvas, {300, 300}, 240);
         drag(canvas, {400, 300}, {350, 260}, Qt::MiddleButton);
         QVERIFY(canvas.rect().contains(canvas.viewport().toScreen(stem).toPoint()));
-        QCOMPARE(pixel(stem), shown);
+        QVERIFY(darkenedAround(canvas, stem) >= 20);
+        QCOMPARE(darkenedAround(canvas, counter), 0);
         canvas.setTool(Tool::Select);
         QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, canvas.viewport().toScreen(stem).toPoint());
         QVERIFY(canvas.document().shapes().empty());
@@ -146,6 +196,32 @@ private slots:
         QVERIFY(canvas.referencePath().isEmpty());
         QVERIFY(canvas.setActiveGlyph({1}));
         QCOMPARE(canvas.referencePath(), path);
+    }
+    void guidePreviewStaysUsableWithWideFonts() {
+        // Very wide label text (large UI fonts, or a box fallback without system fonts) must shrink
+        // the diagram rather than hide it and disable guide dragging.
+        GuidePreview preview;
+        QFont wide = preview.font();
+        wide.setPixelSize(28);
+        wide.setLetterSpacing(QFont::AbsoluteSpacing, 6);
+        preview.setFont(wide);
+        preview.setAttribute(Qt::WA_ShowWithoutActivating);
+        preview.resize(288, 200);
+        preview.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&preview));
+        QVERIFY(QFontMetricsF(wide).horizontalAdvance("Cap height  -16384.5") > preview.width());
+        GlyphDocumentDefinition definition;
+        preview.setDefinition(definition, {});
+        const auto capHeight = preview.guidePoint("Cap height"), baseline = preview.guidePoint("Baseline");
+        QVERIFY(preview.rect().contains(capHeight.toPoint()) && preview.rect().contains(baseline.toPoint()));
+        QVERIFY(baseline.y() - capHeight.y() > 20);
+        double dragged = 0;
+        connect(&preview, &GuidePreview::guideDragged, [&dragged](const QString &, double value) { dragged = value; });
+        const auto start = preview.guidePoint("x-height").toPoint();
+        QTest::mousePress(&preview, Qt::LeftButton, {}, start);
+        QTest::mouseMove(&preview, start - QPoint(0, 4));
+        QTest::mouseRelease(&preview, Qt::LeftButton, {}, start - QPoint(0, 4));
+        QVERIFY(dragged > definition.xHeight && dragged < definition.capHeight);
     }
     void moveAndResizeAcquireGuideIntersection() {
         Canvas canvas;

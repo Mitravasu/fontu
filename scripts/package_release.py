@@ -13,6 +13,9 @@ import urllib.request
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# The bundled reference-glyph font's SIL OFL must ship with every package.
+FONT_LICENSE = ROOT / "resources/fonts/OFL.txt"
+FONT_LICENSE_NAME = "NotoSans-OFL.txt"
 LINUX_TOOLS = {
     "linuxdeploy": (
         "1-alpha-20251107-1",
@@ -103,6 +106,7 @@ def main():
         app = stage / "fontu.app"
         (app / "Contents/Resources").mkdir(exist_ok=True)
         shutil.copy2(ROOT / "LICENSE", app / "Contents/Resources/LICENSE")
+        shutil.copy2(FONT_LICENSE, app / "Contents/Resources" / FONT_LICENSE_NAME)
         run("macdeployqt", app, "-always-overwrite", "-verbose=2")
         verify_macos_dependencies(app)
         # Deployment changes Mach-O files. Restore valid ad-hoc signatures on ARM64.
@@ -121,6 +125,7 @@ def main():
         run("windeployqt", "--release", "--no-compiler-runtime", executable)
         windows_runtime(directory)
         shutil.copy2(ROOT / "LICENSE", directory)
+        shutil.copy2(FONT_LICENSE, directory / FONT_LICENSE_NAME)
         run(sys.executable, smoke, executable)
         shutil.make_archive(str(dist / f"FontU-{version}-windows-{architecture}"), "zip", directory)
     elif system == "Linux":

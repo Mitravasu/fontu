@@ -1,14 +1,29 @@
 #include "reference_glyph.h"
+#include <QFontDatabase>
 #include <QFontMetricsF>
 #include <QTransform>
 
 namespace fontu {
 namespace {
 constexpr int referencePixelSize = 1000;
+// Registers the bundled Noto Sans subset once and returns its family, or an empty string if it
+// cannot be loaded. Bundling keeps the overlay identical everywhere and independent of system fonts,
+// which minimal Linux installs and Qt's offscreen platform on Windows may not provide.
+QString bundledFamily() {
+    static const QString family = [] {
+        const int id = QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/NotoSans-Regular-subset.ttf"));
+        const auto families = id < 0 ? QStringList() : QFontDatabase::applicationFontFamilies(id);
+        return families.isEmpty() ? QString() : families.front();
+    }();
+    return family;
+}
 }
 QFont defaultReferenceFont() {
+    QStringList families{QStringLiteral("Helvetica"), QStringLiteral("Arial"), QStringLiteral("DejaVu Sans")};
+    // System fonts remain fallbacks for characters outside the bundled subset.
+    if (const auto bundled = bundledFamily(); !bundled.isEmpty()) families.prepend(bundled);
     QFont font;
-    font.setFamilies({QStringLiteral("Helvetica"), QStringLiteral("Arial"), QStringLiteral("DejaVu Sans")});
+    font.setFamilies(families);
     font.setStyleHint(QFont::SansSerif);
     return font;
 }
