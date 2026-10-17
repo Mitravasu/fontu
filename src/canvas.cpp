@@ -324,6 +324,20 @@ void Canvas::paintEvent(QPaintEvent *) {
         if (y >= 12 && y <= height() - 18)
             painter.drawText(QPointF(labelX, y - 5), QString::fromUtf8(guide.name) + " " + QString::number(guide.position));
     }
+    if (definition.guideEnabled.sideBearing) {
+        const QColor color = guideColor("Side bearing");
+        painter.setPen(QPen(color, 1, Qt::DashLine));
+        const auto xs = definition.sideBearingGuides();
+        for (const double x : xs) {
+            const auto sx = viewport_.toScreen({x, 0}).x();
+            painter.drawLine(QPointF(sx, page.top()), QPointF(sx, page.bottom()));
+        }
+        // Below the workspace, where the horizontal guide labels never reach.
+        painter.setPen(color.darker(135));
+        if (page.bottom() + 18 <= height())
+            painter.drawText(QPointF(std::max(8.0, viewport_.toScreen({xs[0], 0}).x()), page.bottom() + 16),
+                             QString("Side bearing %1 · %2 between").arg(definition.sideBearing).arg(xs[1] - xs[0]));
+    }
     const auto origin = viewport_.toScreen({0, 0});
     painter.setPen(QPen(QColor("#a7b2c8"), 1, Qt::DashLine));
     painter.drawLine(QPointF(origin.x(), page.top()), QPointF(origin.x(), page.bottom()));

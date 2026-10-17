@@ -101,7 +101,7 @@ private slots:
             d.bounds = {-extent / 2, -extent / 4, extent, extent};
             d.unitsPerEm = extent;
             d.descender = -extent / 4; d.baseline = 0; d.xHeight = extent / 2;
-            d.capHeight = extent * .7; d.ascender = extent * .75;
+            d.capHeight = extent * .7; d.ascender = extent * .75; d.sideBearing = extent / 10;
             const auto accepted = createProject(request);
             QVERIFY(std::holds_alternative<ProjectSnapshot>(accepted));
             QCOMPARE(std::get<ProjectSnapshot>(accepted).definition.bounds.width(), extent);
@@ -161,6 +161,48 @@ private slots:
         const auto snapped = snapPoint(view.toScreen({123, 502}), Document(d, {}), view, {false, true});
         QVERIFY(snapped);
         QCOMPARE(view.toDocument(snapped->point), QPointF(123, 500));
+    }
+    void sideBearingGuidesValidateRoundtripAndSnap() {
+        GlyphDocumentDefinition d;
+        QCOMPARE(d.sideBearingGuides(), (std::array<double, 2>{-400, 400}));
+        QCOMPARE(creationPresets()[2].definition.sideBearingGuides(), (std::array<double, 2>{-400, 400}));
+        d.sideBearing = 500;
+        QVERIFY(!validateWorkspace(d)); // The lines may meet at the centre.
+        d.sideBearing = 501;
+        auto error = validateWorkspace(d);
+        QVERIFY(error);
+        QCOMPARE(error->field, CreationField::Guides);
+        QCOMPARE(error->guides, QStringList({"Side bearing"}));
+        QVERIFY(error->message.startsWith("Side bearing (501) must be from 0 to 500"));
+        d.sideBearing = -1;
+        QVERIFY(validateWorkspace(d));
+
+        auto project = fixture();
+        project.definition.sideBearing = 150;
+        project.definition.guideEnabled.sideBearing = false;
+        const auto loaded = std::get<ProjectSnapshot>(parseProject(projectBytes(project)));
+        QCOMPARE(loaded.definition.sideBearing, 150.);
+        QVERIFY(!loaded.definition.guideEnabled.sideBearing);
+        QCOMPARE(projectBytes(loaded), projectBytes(project));
+        auto root = QJsonDocument::fromJson(projectBytes(project)).object();
+        auto definition = root["definition"].toObject();
+        definition.remove("sideBearing"); definition.remove("guideEnabled"); root["definition"] = definition;
+        const auto legacy = std::get<ProjectSnapshot>(parseProject(QJsonDocument(root).toJson()));
+        QCOMPARE(legacy.definition.sideBearing, project.definition.bounds.width() / 10);
+        QVERIFY(legacy.definition.guideEnabled.sideBearing);
+        definition["sideBearing"] = project.definition.bounds.width(); root["definition"] = definition;
+        QVERIFY(std::holds_alternative<QString>(parseProject(QJsonDocument(root).toJson())));
+
+        d = {};
+        Viewport view;
+        const auto snapped = snapPoint(view.toScreen({397, 260}), Document(d, {}), view, {false, true});
+        QVERIFY(snapped);
+        QCOMPARE(view.toDocument(snapped->point), QPointF(400, 260));
+        const auto crossing = snapPoint(view.toScreen({-397, 697}), Document(d, {}), view, {false, true});
+        QVERIFY(crossing);
+        QCOMPARE(view.toDocument(crossing->point), QPointF(-400, 700));
+        d.guideEnabled.sideBearing = false;
+        QVERIFY(!snapPoint(view.toScreen({397, 260}), Document(d, {}), view, {false, true}));
     }
     void roundTripPreservesProjectAndGeometry() {
         const auto original = fixture();

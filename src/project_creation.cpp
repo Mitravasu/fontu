@@ -13,8 +13,10 @@ const std::array<CreationPreset, 3> &creationPresets() {
         scaled.capHeight = 1434;
         scaled.ascender = 1536;
         scaled.descender = -512;
+        scaled.sideBearing = 205;
         GlyphDocumentDefinition roomy;
         roomy.bounds = {-600, -350, 1200, 1400};
+        roomy.sideBearing = 200; // The same space between the side guides as Classic.
         return std::array<CreationPreset, 3>{{
             {"Classic 1000", "1000 × 1000 units at 1000 UPM. The familiar compact glyph workspace.", {}},
             {"2048 UPM", "2048 × 2048 units with scaled guide proportions. An example at a larger design scale.", scaled},
@@ -108,6 +110,12 @@ std::optional<CreationError> validateWorkspace(const GlyphDocumentDefinition &d)
                 .arg(QString::fromUtf8(lowerName), units(lower), QString::fromUtf8(upperName), units(upper)),
             {QString::fromUtf8(lowerName), QString::fromUtf8(upperName)}};
     }
+    const double halfWidth = d.bounds.width() / 2;
+    if (!(std::isfinite(d.sideBearing) && d.sideBearing >= 0 && d.sideBearing <= halfWidth))
+        return CreationError{CreationField::Guides,
+            QString("Side bearing (%1) must be from 0 to %2, half the workspace width, so the left and right guides do not cross.")
+                .arg(units(d.sideBearing), units(halfWidth)),
+            {"Side bearing"}};
     return std::nullopt;
 }
 ProjectCreationResult createProject(const ProjectCreationDefinition &request) {

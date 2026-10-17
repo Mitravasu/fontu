@@ -254,6 +254,27 @@ private slots:
         QCOMPARE(value("descender"), -512.);
         QVERIFY(!validateWorkspace(preview->definition()));
         QVERIFY(!error->isVisible());
+        // The side bearing scales with Width, clamps to half of it, and drags horizontally from either line.
+        auto *width = window.findChild<QSpinBox *>("workspaceWidth");
+        QCOMPARE(value("sideBearing"), 205.);
+        width->setValue(4096);
+        QCOMPARE(value("sideBearing"), 410.);
+        width->setValue(2048);
+        QCOMPARE(value("sideBearing"), 205.);
+        setGuide("sideBearing", 5000);
+        QCOMPARE(value("sideBearing"), 1024.);
+        QVERIFY(note->isVisible() && note->text().contains("Raise Width"));
+        setGuide("sideBearing", 205);
+        const auto side = preview->sideBearingPoint().toPoint();
+        QTest::mousePress(preview, Qt::LeftButton, {}, side);
+        QTest::mouseMove(preview, side + QPoint(5, 0));
+        QTest::mouseMove(preview, side + QPoint(10, 0));
+        QTest::mouseRelease(preview, Qt::LeftButton, {}, side + QPoint(10, 0));
+        QVERIFY(value("sideBearing") > 205);
+        QCOMPARE(preview->definition().sideBearing, value("sideBearing"));
+        QVERIFY(!validateWorkspace(preview->definition()));
+        window.findChild<QCheckBox *>("sideBearingEnabled")->setChecked(false);
+        QVERIFY(!preview->definition().guideEnabled.sideBearing);
         window.findChild<QCheckBox *>("ascenderEnabled")->setChecked(false);
         QVERIFY(!preview->definition().guideEnabled.ascender);
         QTest::mouseClick(window.findChild<QPushButton *>("createProject"), Qt::LeftButton);

@@ -8,15 +8,17 @@ Width and height accept 16 through 8192 whole font units. Units per em accepts 1
 
 The examples set dimensions and guides together. They retain the selected characters. Editing dimensions or UPM does not rescale guide values.
 
-| Example | Width | Height | UPM | Baseline | x-height | Cap height | Ascender | Descender |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Classic 1000 | 1000 | 1000 | 1000 | 0 | 500 | 700 | 750 | -250 |
-| 2048 UPM | 2048 | 2048 | 2048 | 0 | 1024 | 1434 | 1536 | -512 |
-| Roomy 1000 | 1200 | 1400 | 1000 | 0 | 500 | 700 | 750 | -250 |
+| Example | Width | Height | UPM | Baseline | x-height | Cap height | Ascender | Descender | Side bearing |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Classic 1000 | 1000 | 1000 | 1000 | 0 | 500 | 700 | 750 | -250 | 100 |
+| 2048 UPM | 2048 | 2048 | 2048 | 0 | 1024 | 1434 | 1536 | -512 | 205 |
+| Roomy 1000 | 1200 | 1400 | 1000 | 0 | 500 | 700 | 750 | -250 | 200 |
 
 Classic matches the previous workspace. The 2048 example uses scaled guide proportions. Roomy leaves space outside the design guides for accents and overshoot. These examples do not define glyph advance width or exported font line metrics.
 
 Each of the five guides has an editable value and checkbox. A checked guide renders and participates in Geometry snapping. An unchecked guide does neither, but retains its value. All values must be finite, ordered as descender, baseline, x-height, cap height, and ascender, and inside the workspace. Equality is permitted. Grid snapping and the vertical origin line remain independent.
+
+The **Side bearing** guide is a pair of vertical lines, each that many units in from the left and right workspace edges. Exported glyphs advance by the full workspace width, so drawing every glyph between these lines, including the widest such as m, w, M, and W, gives a monospaced font even spacing. The value must be from 0 to half the workspace width. With Keep proportions on, changing Width or UPM scales it; with it off, a narrower workspace limits it temporarily. Either line drags horizontally in the preview. When checked, the lines render on the canvas, labeled below the workspace, and participate in Geometry snapping, including where they cross the horizontal guides.
 
 ## Character coverage
 
@@ -37,4 +39,4 @@ Create validates the complete candidate before asking to replace dirty work. Sav
 
 Open is available on the creation page and in File. The parser validates the whole file before the dirty gate. A canceled dialog or invalid file preserves the current page and project. Close protects a dirty retained project even while the creation page is visible. Save actions and editor shortcuts are disabled on the creation page. The dirty replacement gate can still save the retained project.
 
-Version 1 `.fontu` files now write an optional `definition.guideEnabled` object with boolean `baseline`, `xHeight`, `capHeight`, `ascender`, and `descender` fields. Missing fields default to true, so previous version-1 projects retain visible and snapping guides. Present fields of the wrong type fail validation. Bounds, metric values, guide enablement, UPM, glyph order, IDs, labels, and drawings round-trip. In-memory histories remain glyph-local and reset after reopening.
+Version 1 `.fontu` files now write an optional `definition.guideEnabled` object with boolean `baseline`, `xHeight`, `capHeight`, `ascender`, `descender`, and `sideBearing` fields, and an optional numeric `definition.sideBearing`. Missing flags default to true, so previous version-1 projects retain visible and snapping guides. A missing side bearing defaults to one tenth of the workspace width; one below 0 or above half the width fails validation. Present fields of the wrong type fail validation. Bounds, metric values, guide enablement, UPM, glyph order, IDs, labels, and drawings round-trip. In-memory histories remain glyph-local and reset after reopening.

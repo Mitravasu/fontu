@@ -22,6 +22,7 @@ struct GuideEnablement {
     bool capHeight = true;
     bool ascender = true;
     bool descender = true;
+    bool sideBearing = true;
 };
 struct TypographyGuide { const char *name; double position; bool enabled = true; };
 struct GlyphDocumentDefinition {
@@ -32,8 +33,13 @@ struct GlyphDocumentDefinition {
     double capHeight = 700;
     double ascender = 750;
     double descender = -250;
+    // Inset of the two vertical guides from each side of the workspace. Glyphs drawn between them,
+    // including the widest such as m and W, keep matching spacing in a monospaced font.
+    double sideBearing = 100;
     GuideEnablement guideEnabled;
     std::array<TypographyGuide, 5> guides() const;
+    // X positions of the left and right side-bearing guides.
+    std::array<double, 2> sideBearingGuides() const;
     QPointF constrainPoint(const QPointF &point) const;
     QPointF constrainTranslation(const QRectF &source, const QPointF &delta) const;
     QPointF constrainTangent(const QPointF &anchor, const QPointF &tangent) const;

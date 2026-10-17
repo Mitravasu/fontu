@@ -49,9 +49,10 @@ QJsonObject definitionObject(const GlyphDocumentDefinition &d) {
     return {{"bounds", QJsonArray{d.bounds.x(), d.bounds.y(), d.bounds.width(), d.bounds.height()}},
             {"unitsPerEm", d.unitsPerEm}, {"baseline", d.baseline}, {"xHeight", d.xHeight},
             {"capHeight", d.capHeight}, {"ascender", d.ascender}, {"descender", d.descender},
+            {"sideBearing", d.sideBearing},
             {"guideEnabled", QJsonObject{{"baseline", d.guideEnabled.baseline}, {"xHeight", d.guideEnabled.xHeight},
                 {"capHeight", d.guideEnabled.capHeight}, {"ascender", d.guideEnabled.ascender},
-                {"descender", d.guideEnabled.descender}}}};
+                {"descender", d.guideEnabled.descender}, {"sideBearing", d.guideEnabled.sideBearing}}}};
 }
 GlyphDocumentDefinition readDefinition(const QJsonValue &value) {
     const auto o = object(value);
@@ -70,6 +71,8 @@ GlyphDocumentDefinition readDefinition(const QJsonValue &value) {
     d.capHeight = number(o.value("capHeight"));
     d.ascender = number(o.value("ascender"));
     d.descender = number(o.value("descender"));
+    // Projects saved before side-bearing guides get one tenth of the width, like a new Classic project.
+    d.sideBearing = o.contains("sideBearing") ? number(o.value("sideBearing")) : d.bounds.width() / 10;
     if (o.contains("guideEnabled")) {
         const auto enabled = object(o.value("guideEnabled"));
         const auto flag = [&enabled](const char *name) {
@@ -77,11 +80,14 @@ GlyphDocumentDefinition readDefinition(const QJsonValue &value) {
             check(enabled.value(name).isBool(), "Guide enablement must be boolean.");
             return enabled.value(name).toBool();
         };
-        d.guideEnabled = {flag("baseline"), flag("xHeight"), flag("capHeight"), flag("ascender"), flag("descender")};
+        d.guideEnabled = {flag("baseline"), flag("xHeight"), flag("capHeight"), flag("ascender"), flag("descender"),
+                          flag("sideBearing")};
     }
     check(d.descender <= d.baseline && d.baseline <= d.xHeight && d.xHeight <= d.capHeight
           && d.capHeight <= d.ascender && d.descender >= d.bounds.top() && d.ascender <= d.bounds.bottom(),
           "Typography guides must be ordered and inside the document.");
+    check(d.sideBearing >= 0 && d.sideBearing <= d.bounds.width() / 2,
+          "Side bearing must be from 0 to half the document width.");
     return d;
 }
 QJsonObject shapeObject(const Shape &shape) {

@@ -32,20 +32,25 @@ private:
     void dimensionsEdited();
     void unitsPerEmEdited();
     void guideEdited(std::size_t index);
+    void sideBearingEdited();
+    void setSideBearingValue(double value);
     void guideDragged(const QString &name, double value);
     void proportionalToggled(bool on);
     void syncGuides();
     void rebaseGuides();
     void setGuideValue(std::size_t index, double value);
-    // A guide value as the user last set it, with the workspace height at that moment.
+    // A guide value as the user last set it, with the workspace extent it scales with at that moment:
+    // height for the horizontal guides, width for the side bearing.
     // Displayed values derive from these so shrinking then growing the workspace is lossless.
-    struct GuideIntent { double value = 0; int height = 0; };
+    struct GuideIntent { double value = 0; int extent = 0; };
     struct DimensionAnchor { int width = 0, height = 0, unitsPerEm = 0; };
     QSpinBox *width_;
     QSpinBox *height_;
     QSpinBox *unitsPerEm_;
     std::array<QDoubleSpinBox *, 5> values_;
     std::array<QCheckBox *, 5> enabled_;
+    QDoubleSpinBox *sideBearing_ = nullptr;
+    QCheckBox *sideBearingEnabled_ = nullptr;
     QComboBox *presets_;
     QComboBox *coverage_;
     QLineEdit *custom_;
@@ -58,6 +63,7 @@ private:
     QCheckBox *proportional_ = nullptr;
     QLabel *guideNote_ = nullptr;
     std::array<GuideIntent, 5> intent_{};
+    GuideIntent sideBearingIntent_;
     DimensionAnchor anchor_;
     bool syncing_ = false;
     bool workspaceError_ = false;
